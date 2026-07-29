@@ -6,6 +6,26 @@ import type {BodyArea, Profile} from "../types";
 import {StatusMessage} from "./StatusMessage";
 
 const symptoms = ["redness", "itching", "dryness", "cracking", "swelling", "pain"] as const;
+const maxPhotos = 12;
+const photoViews = [
+  ["overview", "Overview"],
+  ["palm", "Palm / front"],
+  ["back", "Back of hand"],
+  ["side", "Side"],
+  ["close_up", "Close-up"],
+  ["other", "Other"],
+] as const;
+
+interface PhotoEntry {
+  id: string;
+  bodyAreaCode: string;
+  viewCode: string;
+  file: File | null;
+}
+
+function newPhotoEntry(bodyAreaCode: string, viewCode = "overview"): PhotoEntry {
+  return {id: crypto.randomUUID(), bodyAreaCode, viewCode, file: null};
+}
 
 function localDatetime(): string {
   const now = new Date();
@@ -31,10 +51,35 @@ export function CheckInForm({
   const [scores, setScores] = useState<Record<string, number | null>>(
     Object.fromEntries(symptoms.map((symptom) => [symptom, null])),
   );
-  const [photos, setPhotos] = useState<File[]>([]);
+  const [photoEntries, setPhotoEntries] = useState<PhotoEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  function addPhoto() {
+    setPhotoEntries((entries) =>
+      entries.length >= maxPhotos ? entries : [...entries, newPhotoEntry(bodyArea)],
+    );
+  }
+
+  function addHandViews() {
+    const handViews = [
+      newPhotoEntry("left_hand", "palm"),
+      newPhotoEntry("left_hand", "back"),
+      newPhotoEntry("right_hand", "palm"),
+      newPhotoEntry("right_hand", "back"),
+    ];
+    setPhotoEntries((entries) => [
+      ...entries,
+      ...handViews.slice(0, Math.max(0, maxPhotos - entries.length)),
+    ]);
+  }
+
+  function updatePhotoEntry(id: string, update: Partial<PhotoEntry>) {
+    setPhotoEntries((entries) =>
+      entries.map((entry) => entry.id === id ? {...entry, ...update} : entry),
+    );
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -52,7 +97,7 @@ export function CheckInForm({
           occurred_start: time,
           recorded_timezone: profile.timezone,
           label: `${period === "morning" ? "Morning" : "Evening"} skin check`,
-          attributes: {period, capture_protocol_version: 1},
+          attributes: {period, capture_protocol_version: 2},
           trust_status: "trusted",
           source_method: "manual",
         })
@@ -85,11 +130,26 @@ export function CheckInForm({
         if (observationError) throw observationError;
       }
 
-      for (const photo of photos) {
-        await uploadArtifact(session, skinEvent.id, photo, "skin-originals", "skin_photo", bodyArea);
+      const selectedPhotos = photoEntries.filter(
+        (entry): entry is PhotoEntry & {file: File} => entry.file !== null,
+      );
+      for (const [index, entry] of selectedPhotos.entries()) {
+        await uploadArtifact(
+          session,
+          skinEvent.id,
+          entry.file,
+          "skin-originals",
+          "skin_photo",
+          {
+            bodyAreaCode: entry.bodyAreaCode,
+            viewCode: entry.viewCode,
+            displayOrder: index,
+            capturedAt: time,
+          },
+        );
       }
       setSuccess("Skin check saved.");
-      setPhotos([]);
+      setPhotoEntries([]);
       setScores(Object.fromEntries(symptoms.map((symptom) => [symptom, null])));
       onSaved();
     } catch (caught) {
@@ -121,7 +181,7 @@ export function CheckInForm({
         <div className="form-grid">
           <label>When<input type="datetime-local" value={occurred} onChange={(event) => setOccurred(event.target.value)} required /></label>
           <label>
-            Body area
+            Symptom area
             <select value={bodyArea} onChange={(event) => setBodyArea(event.target.value)}>
               {bodyAreas.map((area) => <option value={area.code} key={area.code}>{area.label}</option>)}
             </select>
@@ -157,18 +217,90 @@ export function CheckInForm({
             </label>
           ))}
         </div>
-        <label className="upload-zone">
-          <strong>Add photos for {bodyAreas.find((area) => area.code === bodyArea)?.label}</strong>
-          <span>Keep the area centered; avoid flash and harsh shadows.</span>
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-            capture="environment"
-            multiple
-            onChange={(event) => setPhotos(Array.from(event.target.files || []))}
-          />
-          {photos.length > 0 && <em>{photos.length} photo{photos.length === 1 ? "" : "s"} selected</em>}
-        </label>
+        <fieldset className="subcard photo-capture">
+          <legend>Photos</legend>
+          <p className="evidence">
+            Give each photo its own area and view. Keep lighting, distance, and framing
+            consistent where practical.
+          </p>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary small"
+              disabled={photoEntries.length >= maxPhotos}
+              onClick={addPhoto}
+            >
+              Add photo
+            </button>
+            <button
+              type="button"
+              className="secondary small"
+              disabled={photoEntries.length > maxPhotos - 4}
+              onClick={addHandViews}
+            >
+              Add left/right palm & back
+            </button>
+            <span className="evidence">{photoEntries.length}/{maxPhotos} slots</span>
+          </div>
+          <div className="photo-capture-list">
+            {photoEntries.map((entry, index) => (
+              <article className="photo-entry" key={entry.id}>
+                <div className="photo-entry-heading">
+                  <strong>Photo {index + 1}</strong>
+                  <button
+                    type="button"
+                    className="text-button small"
+                    onClick={() => setPhotoEntries((entries) =>
+                      entries.filter((item) => item.id !== entry.id)
+                    )}
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div className="form-grid">
+                  <label>
+                    Body area
+                    <select
+                      value={entry.bodyAreaCode}
+                      onChange={(event) =>
+                        updatePhotoEntry(entry.id, {bodyAreaCode: event.target.value})
+                      }
+                    >
+                      {bodyAreas.map((area) => (
+                        <option value={area.code} key={area.code}>{area.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    View
+                    <select
+                      value={entry.viewCode}
+                      onChange={(event) =>
+                        updatePhotoEntry(entry.id, {viewCode: event.target.value})
+                      }
+                    >
+                      {photoViews.map(([value, label]) => (
+                        <option value={value} key={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <label className="upload-zone">
+                  <strong>{entry.file ? "Replace photo" : "Take or choose photo"}</strong>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                    capture="environment"
+                    onChange={(event) =>
+                      updatePhotoEntry(entry.id, {file: event.target.files?.[0] || null})
+                    }
+                  />
+                  {entry.file && <em>{entry.file.name}</em>}
+                </label>
+              </article>
+            ))}
+          </div>
+        </fieldset>
         <StatusMessage error={error} success={success} />
         <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save skin check"}</button>
       </form>

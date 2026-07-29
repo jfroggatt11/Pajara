@@ -33,13 +33,20 @@ async function sha256(file: Blob): Promise<string> {
     .join("");
 }
 
+interface ArtifactLinkOptions {
+  bodyAreaCode?: string;
+  viewCode?: string;
+  displayOrder?: number;
+  capturedAt?: string;
+}
+
 export async function uploadArtifact(
   session: Session,
   eventId: string,
   file: File,
   bucket: "skin-originals" | "voice-originals" | "input-originals",
   role: "skin_photo" | "voice_note" | "original_input",
-  bodyAreaCode?: string,
+  options: ArtifactLinkOptions = {},
 ): Promise<string> {
   const objectPath = `${session.user.id}/${eventId}/${crypto.randomUUID()}-${sanitizeFilename(file.name)}`;
   const mediaType = inferMediaType(file);
@@ -61,7 +68,7 @@ export async function uploadArtifact(
       byte_size: file.size,
       original_filename: file.name,
       artifact_kind: role,
-      captured_at: new Date().toISOString(),
+      captured_at: options.capturedAt || new Date().toISOString(),
       metadata: {},
     })
     .select()
@@ -73,7 +80,9 @@ export async function uploadArtifact(
     event_id: eventId,
     artifact_id: artifact.id,
     role,
-    body_area_code: bodyAreaCode || null,
+    body_area_code: options.bodyAreaCode || null,
+    view_code: options.viewCode || null,
+    display_order: options.displayOrder || 0,
   });
   if (linkError) throw linkError;
   return artifact.id as string;

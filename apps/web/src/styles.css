@@ -73,6 +73,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .upload-zone { border: 1px dashed #87a49d; padding: 22px; border-radius: 16px; background: #eef5f1; }
 .upload-zone input { border: 0; padding-left: 0; background: transparent; }
 .upload-zone em { color: var(--forest); }
+.photo-capture-list { display: grid; gap: 14px; }
+.photo-entry { border: 1px solid var(--line); border-radius: 15px; padding: 16px; display: grid; gap: 14px; background: var(--paper); }
+.photo-entry-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.photo-entry .upload-zone { padding: 16px; }
 .check-row { display: flex; align-items: flex-start; gap: 10px; font-weight: 500; }
 .check-row input { width: 18px; height: 18px; accent-color: var(--forest); }
 .check-row.compact { align-self: end; padding: 13px; }

@@ -381,15 +381,17 @@ immutable after release.
 ### 8.1 Skin check
 
 1. Choose morning/evening and occurrence time.
-2. Choose a named body area; repeat the short check for another area when needed.
+2. Choose the body area used for symptom scores.
 3. Score each symptom or deliberately mark it unobserved.
-4. Capture/upload one or more photos tied to that area.
+4. Add up to twelve photo slots, each with its own named body area and view.
 5. Show pose, lighting, distance, blur, and exposure guidance.
 6. Save immediately; photo processing can continue asynchronously.
 
 Originals are never modified. Photo comparison supports side-by-side viewing and an
-opacity overlay. Derived thumbnails, automatic alignment, and synchronized zoom are
-later enhancements. No automated diagnosis or clinical image score is included.
+opacity overlay, labels area/view, and initially pairs matching views where available.
+A four-slot hand preset captures left palm, left back, right palm, and right back.
+Derived thumbnails, automatic alignment, and synchronized zoom are later
+enhancements. No automated diagnosis or clinical image score is included.
 
 ### 8.2 Quick log
 

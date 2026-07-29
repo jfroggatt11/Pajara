@@ -4,6 +4,7 @@ import {supabase} from "../lib/supabase";
 interface PhotoLink {
   id: string;
   body_area_code: string | null;
+  view_code: string | null;
   artifacts: {
     bucket: string;
     object_path: string;
@@ -21,7 +22,7 @@ export function PhotoCompare({refreshKey}: {refreshKey: number}) {
   useEffect(() => {
     void supabase
       .from("record_artifacts")
-      .select("id,body_area_code,artifacts!inner(bucket,object_path,captured_at)")
+      .select("id,body_area_code,view_code,artifacts!inner(bucket,object_path,captured_at)")
       .eq("role", "skin_photo")
       .order("created_at", {ascending: false})
       .limit(50)
@@ -36,8 +37,22 @@ export function PhotoCompare({refreshKey}: {refreshKey: number}) {
           }),
         );
         setPhotos(signed);
-        setFirst((value) => value || signed[1]?.id || signed[0]?.id || "");
-        setSecond((value) => value || signed[0]?.id || "");
+        const later = signed[0];
+        const matchingEarlier = later
+          ? signed.find((photo) =>
+              photo.id !== later.id
+              && photo.body_area_code === later.body_area_code
+              && photo.view_code === later.view_code
+            )
+          : undefined;
+        setFirst((value) =>
+          signed.some((photo) => photo.id === value)
+            ? value
+            : matchingEarlier?.id || signed[1]?.id || later?.id || ""
+        );
+        setSecond((value) =>
+          signed.some((photo) => photo.id === value) ? value : later?.id || ""
+        );
       });
   }, [refreshKey]);
 
@@ -46,6 +61,8 @@ export function PhotoCompare({refreshKey}: {refreshKey: number}) {
 
   const optionLabel = (photo: PhotoLink) =>
     `${photo.body_area_code?.replaceAll("_", " ") || "Unassigned"} · ${
+      photo.view_code?.replaceAll("_", " ") || "unspecified view"
+    } · ${
       photo.artifacts.captured_at
         ? new Date(photo.artifacts.captured_at).toLocaleString()
         : "Unknown time"
@@ -81,4 +98,3 @@ export function PhotoCompare({refreshKey}: {refreshKey: number}) {
     </section>
   );
 }
-
