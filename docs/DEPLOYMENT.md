@@ -122,7 +122,9 @@ The exact official 0.1.29 browser bundle and licence are checked into
 upstream npm manifest and prevents unused Node-only packages from entering the
 Netlify build. Verify its documented SHA-256 before intentional replacement. CSP
 includes the narrow `wasm-unsafe-eval` permission required for browser WASM; it does
-not enable general JavaScript `unsafe-eval`.
+not enable general JavaScript `unsafe-eval`. It also allows scripts and workers only
+from jsDelivr in addition to Pajara itself because ONNX Runtime dynamically imports
+its pinned runtime module from that CDN.
 
 If local transcription fails, the user must either enter and confirm the transcript
 manually or explicitly select the backend fallback. Backend fallback requires
