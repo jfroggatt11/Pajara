@@ -1,6 +1,6 @@
 """Worker claim behavior tests."""
 
-from typing import Any
+from typing import Any, cast
 
 from pajara.config import Settings
 from pajara.providers import FakeExtractionProvider
@@ -95,7 +95,8 @@ async def test_run_once_returns_false_when_queue_is_empty() -> None:
 async def test_forced_backend_transcription_is_proposed_for_review() -> None:
     worker = object.__new__(Worker)
     worker.settings = Settings()
-    worker.client = ExtractionClient()
+    extraction_client = ExtractionClient()
+    worker.client = cast(SupabaseClient, extraction_client)
     worker.provider = TranscribingFakeProvider()
 
     result = await worker._extract(
@@ -109,7 +110,7 @@ async def test_forced_backend_transcription_is_proposed_for_review() -> None:
         }
     )
 
-    assertions = worker.client.inserted["field_assertions"]
+    assertions = extraction_client.inserted["field_assertions"]
     transcript = assertions[0]
     assert transcript["field_path"] == "/attributes/original_text"
     assert transcript["proposed_value"] == "made lunch\nhandled raw tomato"
