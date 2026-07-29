@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@moonshine-ai/moonshine-js": "file:../../vendor/moonshine-js",
     "@supabase/supabase-js": "^2.57.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
@@ -26,4 +27,3 @@
     "vitest": "^3.2.4"
   }
 }
-

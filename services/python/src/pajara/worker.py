@@ -115,9 +115,10 @@ class Worker:
         event = events[0]
         source_text = str(event.get("attributes", {}).get("original_text", "")).strip()
         provenance = "parsed_text"
+        transcribed_text: str | None = None
 
         artifact_id = job["payload"].get("artifact_id")
-        if not source_text and artifact_id:
+        if artifact_id and (not source_text or bool(job["payload"].get("force_transcription"))):
             artifacts = await self.client.select(
                 "artifacts", query=f"select=*&id=eq.{artifact_id}&limit=1"
             )
@@ -125,12 +126,15 @@ class Worker:
                 raise ValueError("Target artifact does not exist")
             artifact = artifacts[0]
             content = await self.client.download(artifact["bucket"], artifact["object_path"])
-            source_text = await asyncio.to_thread(
-                self.provider.transcribe,
-                artifact.get("original_filename") or "voice-note",
-                artifact["media_type"],
-                content,
-            )
+            transcribed_text = (
+                await asyncio.to_thread(
+                    self.provider.transcribe,
+                    artifact.get("original_filename") or "voice-note",
+                    artifact["media_type"],
+                    content,
+                )
+            ).strip()
+            source_text = "\n".join(part for part in [source_text, transcribed_text] if part)
             provenance = "transcribed"
 
         run = await self.client.insert(
@@ -149,6 +153,23 @@ class Worker:
         )
         proposal = await asyncio.to_thread(self.provider.extract, event["type_code"], source_text)
         assertions = []
+        if transcribed_text:
+            assertions.append(
+                {
+                    "user_id": job["user_id"],
+                    "extraction_run_id": run["id"],
+                    "target_kind": "event",
+                    "target_id": event_id,
+                    "field_path": "/attributes/original_text",
+                    "proposed_value": source_text,
+                    "confidence": 0.0,
+                    "evidence": {
+                        "text": "Transcript proposed from the original voice recording; "
+                        "confidence is unavailable."
+                    },
+                    "provenance_method": "transcribed",
+                }
+            )
         for item in proposal.assertions:
             row = item.model_dump(mode="json")
             assertions.append(

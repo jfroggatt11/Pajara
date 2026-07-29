@@ -46,7 +46,8 @@ The first deployable prototype must let one invited user:
 4. score redness, itching, dryness, cracking, swelling, and pain;
 5. log meals, meal preparation, skin contacts, products, treatments, activities, and
    notes using structured controls or free text;
-6. record and upload voice notes;
+6. record voice notes, transcribe English speech locally with Moonshine, require
+   transcript confirmation, and upload the original audio;
 7. distinguish food consumed from food handled during preparation;
 8. request AI extraction and review/edit/reject every proposed field;
 9. view a timeline, symptom trends, and private photos;
@@ -63,9 +64,11 @@ Phone / browser
     |
     v
 React + TypeScript PWA (Netlify)
-    |                         \
-    | Supabase user JWT        \ authenticated API request
-    v                           v
+    |        |                       \
+    |        +-- Moonshine STT        \ authenticated API request
+    |            (on device)           \
+    | Supabase user JWT                 \
+    v                                    v
 Supabase                    Python service (container host)
   Auth                        FastAPI API process
   Postgres                    Worker process
@@ -85,6 +88,8 @@ Responsibilities:
 
 - authentication and session refresh through Supabase Auth;
 - mobile-first capture, camera/file selection, audio recording, and review;
+- lazy-loaded English Moonshine transcription on the user's device, with an editable
+  transcript that must be confirmed before it is used as trusted source text;
 - direct authenticated upload to private Supabase Storage;
 - user-scoped CRUD through the Supabase Data API and RLS;
 - authenticated calls to the Python service for jobs;

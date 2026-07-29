@@ -1,8 +1,13 @@
-import {useState, type FormEvent} from "react";
+import {useEffect, useState, type FormEvent} from "react";
 import type {Session} from "@supabase/supabase-js";
 import {useVoiceRecorder} from "../hooks/useVoiceRecorder";
 import {apiPost} from "../lib/api";
 import {uploadArtifact} from "../lib/artifacts";
+import {
+  buildVoiceTranscriptionProvenance,
+  moonshineConfig,
+  transcribeWithMoonshine,
+} from "../lib/moonshine";
 import {supabase} from "../lib/supabase";
 import type {BodyArea, Profile} from "../types";
 import {StatusMessage} from "./StatusMessage";
@@ -36,10 +41,56 @@ export function QuickLogForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<
+    "idle" | "loading" | "transcribing" | "ready" | "error"
+  >("idle");
+  const [machineTranscript, setMachineTranscript] = useState<string | null>(null);
+  const [transcriptConfirmed, setTranscriptConfirmed] = useState(false);
+  const [transcriptConfirmedAt, setTranscriptConfirmedAt] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [useBackendFallback, setUseBackendFallback] = useState(false);
+  const [textBeforeVoice, setTextBeforeVoice] = useState("");
   const voice = useVoiceRecorder();
+
+  useEffect(() => {
+    if (!voice.audioFile) return;
+    let cancelled = false;
+    setVoiceStatus("loading");
+    setMachineTranscript(null);
+    setTranscriptConfirmed(false);
+    setTranscriptConfirmedAt(null);
+    setVoiceError(null);
+    setUseBackendFallback(false);
+
+    void transcribeWithMoonshine(voice.audioFile)
+      .then((transcript) => {
+        if (cancelled) return;
+        setMachineTranscript(transcript);
+        setText((current) => current.trim() ? `${current.trim()}\n${transcript}` : transcript);
+        setVoiceStatus("ready");
+      })
+      .catch((caught) => {
+        if (cancelled) return;
+        setVoiceError(
+          caught instanceof Error ? caught.message : "Local transcription failed.",
+        );
+        setVoiceStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [voice.audioFile]);
 
   async function startVoice() {
     setError(null);
+    setTextBeforeVoice(text);
+    setVoiceStatus("idle");
+    setMachineTranscript(null);
+    setTranscriptConfirmed(false);
+    setTranscriptConfirmedAt(null);
+    setVoiceError(null);
+    setUseBackendFallback(false);
     try {
       await voice.start();
     } catch (caught) {
@@ -51,6 +102,17 @@ export function QuickLogForm({
     }
   }
 
+  function discardVoice() {
+    setText(textBeforeVoice);
+    voice.clear();
+    setVoiceStatus("idle");
+    setMachineTranscript(null);
+    setTranscriptConfirmed(false);
+    setTranscriptConfirmedAt(null);
+    setVoiceError(null);
+    setUseBackendFallback(false);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -58,6 +120,15 @@ export function QuickLogForm({
     setSuccess(null);
     try {
       const now = new Date().toISOString();
+      const voiceTranscription = voice.audioFile
+        ? buildVoiceTranscriptionProvenance({
+            machineTranscript,
+            confirmedText: text,
+            confirmedAt: transcriptConfirmedAt,
+            fallbackRequested: useBackendFallback,
+            localError: voiceError,
+          })
+        : undefined;
       const {data: mainEvent, error: eventError} = await supabase
         .from("events")
         .insert({
@@ -67,7 +138,11 @@ export function QuickLogForm({
           occurred_start: now,
           recorded_timezone: profile.timezone,
           label: null,
-          attributes: {original_text: text, prepared_by_user: type === "meal" ? prepared : undefined},
+          attributes: {
+            original_text: text,
+            prepared_by_user: type === "meal" ? prepared : undefined,
+            voice_transcription: voiceTranscription,
+          },
           trust_status: requestAi && !(type === "meal" && prepared) ? "draft" : "trusted",
           source_method: voice.audioFile ? "voice" : "text",
         })
@@ -92,6 +167,7 @@ export function QuickLogForm({
               handled_ingredients_text: handled,
               contact_body_area: bodyArea,
               gloves_used: gloves,
+              voice_transcription: voiceTranscription,
             },
             trust_status: requestAi ? "draft" : "trusted",
             source_method: voice.audioFile ? "voice" : "text",
@@ -126,6 +202,7 @@ export function QuickLogForm({
           await apiPost("/v1/jobs/extraction", session, {
             event_id: extractionTarget,
             artifact_id: artifactId,
+            force_transcription: useBackendFallback,
           });
         } catch (caught) {
           const {error: trustError} = await supabase
@@ -147,6 +224,13 @@ export function QuickLogForm({
           setText("");
           setHandled("");
           voice.clear();
+          setVoiceStatus("idle");
+          setMachineTranscript(null);
+          setTranscriptConfirmed(false);
+          setTranscriptConfirmedAt(null);
+          setVoiceError(null);
+          setUseBackendFallback(false);
+          setTextBeforeVoice("");
           onSaved();
           return;
         }
@@ -155,6 +239,13 @@ export function QuickLogForm({
       setText("");
       setHandled("");
       voice.clear();
+      setVoiceStatus("idle");
+      setMachineTranscript(null);
+      setTranscriptConfirmed(false);
+      setTranscriptConfirmedAt(null);
+      setVoiceError(null);
+      setUseBackendFallback(false);
+      setTextBeforeVoice("");
       onSaved();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the log.");
@@ -181,20 +272,114 @@ export function QuickLogForm({
           <textarea
             rows={5}
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              setText(event.target.value);
+              if (voice.audioFile) {
+                setTranscriptConfirmed(false);
+                setTranscriptConfirmedAt(null);
+              }
+            }}
             placeholder="For example: Made tomato pasta, chopped tomatoes with bare hands, then washed with the kitchen soap."
           />
         </label>
         <div className="voice-row">
-          {!voice.recording ? (
+          {!voice.recording && !voice.audioFile ? (
             <button type="button" className="secondary" onClick={() => void startVoice()}>
               Record voice note
             </button>
-          ) : (
+          ) : voice.recording ? (
             <button type="button" className="danger" onClick={voice.stop}>Stop recording</button>
+          ) : (
+            <button type="button" className="secondary" onClick={discardVoice}>
+              Discard and re-record
+            </button>
           )}
-          {voice.audioFile && <span>Voice note ready · {(voice.audioFile.size / 1024).toFixed(0)} KB</span>}
+          {voice.recording && <span>Maximum {voice.maxRecordingSeconds} seconds</span>}
+          {voice.audioFile && (
+            <span>
+              Voice note ready · {(voice.audioFile.size / 1024).toFixed(0)} KB
+              {voice.durationSeconds === null ? "" : ` · ${voice.durationSeconds.toFixed(1)} sec`}
+            </span>
+          )}
         </div>
+        {voice.audioFile && (
+          <fieldset className="subcard voice-review">
+            <legend>Review voice transcript</legend>
+            {voiceStatus === "loading" || voiceStatus === "transcribing" ? (
+              <p className="voice-progress" aria-live="polite">
+                Loading the {moonshineConfig.model.replace("model/", "")} English model and
+                transcribing on this device. The first use may take a little while.
+              </p>
+            ) : voiceStatus === "ready" ? (
+              <>
+                <p className="status success">
+                  Local transcript ready. Correct the description above, then confirm it.
+                </p>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={transcriptConfirmed}
+                    onChange={(event) => {
+                      setTranscriptConfirmed(event.target.checked);
+                      setTranscriptConfirmedAt(
+                        event.target.checked ? new Date().toISOString() : null,
+                      );
+                    }}
+                  />
+                  <span>I reviewed the voice transcript and corrected any mistakes.</span>
+                </label>
+              </>
+            ) : voiceStatus === "error" ? (
+              <>
+                <p className="status error">
+                  Local transcription did not complete: {voiceError}
+                </p>
+                <p className="evidence">
+                  You can type the transcript above and confirm it, or explicitly request
+                  the configured backend transcription fallback.
+                </p>
+                {text.trim() && (
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={transcriptConfirmed}
+                      onChange={(event) => {
+                        setTranscriptConfirmed(event.target.checked);
+                        setTranscriptConfirmedAt(
+                          event.target.checked ? new Date().toISOString() : null,
+                        );
+                        if (event.target.checked) setUseBackendFallback(false);
+                      }}
+                    />
+                    <span>I entered and reviewed the transcript manually.</span>
+                  </label>
+                )}
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={useBackendFallback}
+                    disabled={!requestAi}
+                    onChange={(event) => {
+                      setUseBackendFallback(event.target.checked);
+                      if (event.target.checked) {
+                        setTranscriptConfirmed(false);
+                        setTranscriptConfirmedAt(null);
+                      }
+                    }}
+                  />
+                  <span>
+                    Send this audio to the configured backend transcription provider.
+                    The resulting transcript and fields will require review.
+                  </span>
+                </label>
+              </>
+            ) : null}
+            <p className="evidence">
+              Moonshine transcription runs locally. The original recording is still saved
+              privately with this log for provenance.
+            </p>
+          </fieldset>
+        )}
         {type === "meal" && (
           <fieldset className="subcard">
             <legend>Preparation and skin contact</legend>
@@ -217,11 +402,31 @@ export function QuickLogForm({
           </fieldset>
         )}
         <label className="check-row">
-          <input type="checkbox" checked={requestAi} onChange={(event) => setRequestAi(event.target.checked)} />
+          <input
+            type="checkbox"
+            checked={requestAi}
+            onChange={(event) => {
+              setRequestAi(event.target.checked);
+              if (!event.target.checked) setUseBackendFallback(false);
+            }}
+          />
           <span>Ask AI to propose structured fields. Nothing becomes trusted until I review it.</span>
         </label>
         <StatusMessage error={error} success={success} />
-        <button className="primary" disabled={busy || (!text.trim() && !voice.audioFile)}>
+        <button
+          className="primary"
+          disabled={
+            busy
+            || (!text.trim() && !voice.audioFile)
+            || voiceStatus === "loading"
+            || voiceStatus === "transcribing"
+            || Boolean(
+              voice.audioFile
+              && !useBackendFallback
+              && (!text.trim() || !transcriptConfirmed),
+            )
+          }
+        >
           {busy ? "Saving…" : "Save log"}
         </button>
       </form>

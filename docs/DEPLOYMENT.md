@@ -102,6 +102,33 @@ public port.
 6. Inspect the production JavaScript bundle and confirm it contains no secret/admin or
    AI key.
 
+### Local voice transcription
+
+Voice notes use the pinned beta package `@moonshine-ai/moonshine-js` and its English
+Tiny model. The package is loaded only when a recording needs transcription. On first
+use, the browser downloads model and ONNX runtime assets from
+`download.moonshine.ai` and `cdn.jsdelivr.net`; the current Content Security Policy
+allows those HTTPS requests. The currently referenced encoder, decoder, and WASM
+runtime total roughly 50 MB, so perform the first phone test on a reliable connection.
+
+No Moonshine key or Netlify environment variable is required. Test the deployed app
+on each intended phone/browser because model download, audio decoding, memory, and
+browser cache eviction vary by device. The current browser package does not require
+cross-origin isolation headers, so do not add COOP/COEP without separately
+regression-testing Supabase Auth and signed Storage URLs.
+
+The exact official 0.1.29 browser bundle and licence are checked into
+`vendor/moonshine-js`. This avoids an invalid repository-local dependency in the
+upstream npm manifest and prevents unused Node-only packages from entering the
+Netlify build. Verify its documented SHA-256 before intentional replacement. CSP
+includes the narrow `wasm-unsafe-eval` permission required for browser WASM; it does
+not enable general JavaScript `unsafe-eval`.
+
+If local transcription fails, the user must either enter and confirm the transcript
+manually or explicitly select the backend fallback. Backend fallback requires
+`EXTRACTION_PROVIDER=openai` and `OPENAI_API_KEY`; its proposed transcript remains
+draft data until reviewed.
+
 ## 5. Acceptance test
 
 On the intended phone:
@@ -114,11 +141,15 @@ On the intended phone:
    - record food consumed;
    - record ingredients actually handled;
    - choose body area and glove state.
-6. Queue fake extraction, let the worker process it, then accept/correct/reject fields.
-7. Confirm pending data is absent from trusted trends until review.
-8. Run a descriptive analysis and generate a report.
-9. Queue an export and validate its manifest checksums.
-10. Turn off the AI/backend and confirm manual capture still saves.
+6. Record an English voice note of no more than 30 seconds:
+   - allow the first-use Moonshine download to complete;
+   - correct and confirm the local transcript;
+   - verify the event retains transcription provenance and the private original audio.
+7. Queue fake extraction, let the worker process it, then accept/correct/reject fields.
+8. Confirm pending data is absent from trusted trends until review.
+9. Run a descriptive analysis and generate a report.
+10. Queue an export and validate its manifest checksums.
+11. Turn off the AI/backend and confirm manual capture still saves.
 
 Only after that test should `EXTRACTION_PROVIDER=openai` be enabled for one consented
 sample.
@@ -144,3 +175,5 @@ ready for daily use.
 - AI extraction currently proposes event fields. Normalized ingredient composition
   review is the next data feature.
 - Analysis is deliberately descriptive until enough repeated observations exist.
+- Moonshine browser transcription is currently English-only in this prototype and
+  uses a beta package pinned to an exact version.

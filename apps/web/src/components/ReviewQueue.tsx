@@ -51,7 +51,10 @@ export function ReviewQueue({refreshKey}: {refreshKey: number}) {
               <div className="assertion-meta">
                 <span>{item.field_path.replace("/attributes/", "").replace("/", "")}</span>
                 <span className={item.confidence < 0.7 ? "confidence low" : "confidence"}>
-                  {Math.round(item.confidence * 100)}% extraction confidence
+                  {item.provenance_method === "transcribed"
+                    && item.field_path === "/attributes/original_text"
+                    ? "confidence unavailable"
+                    : `${Math.round(item.confidence * 100)}% extraction confidence`}
                 </span>
               </div>
               <pre>{JSON.stringify(item.proposed_value, null, 2)}</pre>

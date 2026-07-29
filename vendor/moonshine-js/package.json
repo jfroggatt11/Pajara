@@ -1,0 +1,13 @@
+{
+  "name": "@moonshine-ai/moonshine-js",
+  "version": "0.1.29-pajara.1",
+  "description": "Vendored official MoonshineJS 0.1.29 browser bundle",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "import": "./dist/moonshine.min.js"
+    }
+  },
+  "main": "./dist/moonshine.min.js"
+}

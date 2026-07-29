@@ -20,6 +20,7 @@ class UserIdentity(BaseModel):
 class ExtractionJobRequest(BaseModel):
     event_id: UUID
     artifact_id: UUID | None = None
+    force_transcription: bool = False
 
 
 class AnalysisJobRequest(BaseModel):
