@@ -3,11 +3,11 @@ import type {Session} from "@supabase/supabase-js";
 import {useVoiceRecorder} from "../hooks/useVoiceRecorder";
 import {apiPost} from "../lib/api";
 import {uploadArtifact} from "../lib/artifacts";
+import {transcribeWithMoonshine} from "../lib/moonshine";
 import {
   buildVoiceTranscriptionProvenance,
   moonshineConfig,
-  transcribeWithMoonshine,
-} from "../lib/moonshine";
+} from "../lib/voiceTranscription";
 import {supabase} from "../lib/supabase";
 import type {BodyArea, Profile} from "../types";
 import {StatusMessage} from "./StatusMessage";

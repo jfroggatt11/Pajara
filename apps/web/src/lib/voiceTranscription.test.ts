@@ -1,5 +1,8 @@
 import {describe, expect, it} from "vitest";
-import {buildVoiceTranscriptionProvenance, moonshineConfig} from "./moonshine";
+import {
+  buildVoiceTranscriptionProvenance,
+  moonshineConfig,
+} from "./voiceTranscription";
 
 describe("voice transcription provenance", () => {
   it("records an on-device transcript and user correction", () => {
