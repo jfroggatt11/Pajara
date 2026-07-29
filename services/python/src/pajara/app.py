@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import FastAPI, Header, HTTPException, Response, status
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from pajara.auth import CurrentUser
@@ -19,6 +19,7 @@ from pajara.domain import (
 )
 from pajara.jobs import enqueue_job, ensure_owned
 from pajara.supabase import SupabaseClient, SupabaseError
+from pajara.worker import Worker
 
 
 def _user_client(settings: Settings, token: str) -> SupabaseClient:
@@ -33,6 +34,12 @@ def _user_client(settings: Settings, token: str) -> SupabaseClient:
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Create the Pajara API."""
     active_settings = settings or get_settings()
+    inline_worker = Worker(active_settings) if active_settings.run_worker_in_api else None
+
+    def process_queued_job(background_tasks: BackgroundTasks) -> None:
+        if inline_worker:
+            background_tasks.add_task(inline_worker.run_once)
+
     app = FastAPI(
         title="Pajara service",
         summary="AI extraction, analysis, reports, and exports",
@@ -76,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def request_extraction(
         request: ExtractionJobRequest,
+        background_tasks: BackgroundTasks,
         user: CurrentUser,
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobAccepted:
@@ -90,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.model_dump(mode="json", exclude_none=True),
             idempotency_key,
         )
+        process_queued_job(background_tasks)
         return JobAccepted(job_id=job["id"])
 
     @app.post(
@@ -99,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def request_analysis(
         request: AnalysisJobRequest,
+        background_tasks: BackgroundTasks,
         user: CurrentUser,
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobAccepted:
@@ -121,6 +131,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"analysis_run_id": analysis["id"]},
             idempotency_key,
         )
+        process_queued_job(background_tasks)
         return JobAccepted(job_id=job["id"], related_id=analysis["id"])
 
     @app.post(
@@ -130,6 +141,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def request_report(
         request: ReportJobRequest,
+        background_tasks: BackgroundTasks,
         user: CurrentUser,
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobAccepted:
@@ -142,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.model_dump(mode="json"),
             idempotency_key,
         )
+        process_queued_job(background_tasks)
         return JobAccepted(job_id=job["id"], related_id=request.analysis_run_id)
 
     @app.post(
@@ -151,6 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def request_export(
         request: ExportJobRequest,
+        background_tasks: BackgroundTasks,
         user: CurrentUser,
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobAccepted:
@@ -162,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.model_dump(mode="json"),
             idempotency_key,
         )
+        process_queued_job(background_tasks)
         return JobAccepted(job_id=job["id"])
 
     @app.post(
@@ -171,6 +186,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def request_deletion(
         request: DeletionJobRequest,
+        background_tasks: BackgroundTasks,
         user: CurrentUser,
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobAccepted:
@@ -195,6 +211,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.model_dump(mode="json", exclude_none=True),
             idempotency_key,
         )
+        process_queued_job(background_tasks)
         return JobAccepted(job_id=job["id"], related_id=request.event_id)
 
     @app.get("/v1/jobs/{job_id}")

@@ -8,8 +8,8 @@ conditions, establish causes, or advise medication changes.
 
 - `apps/web`: React/Vite PWA deployed to Netlify
 - `supabase`: Auth, Postgres migrations, RLS, private Storage, and durable jobs
-- `services/python`: FastAPI API plus background worker for extraction, analysis,
-  reports, and exports
+- `services/python`: FastAPI API with free inline job processing or a separately
+  deployable worker for extraction, analysis, reports, and exports
 - `packages/schemas`: shared versioned JSON Schemas
 
 See [the full implementation plan](docs/IMPLEMENTATION_PLAN.md) and
@@ -66,4 +66,3 @@ The OpenAI adapter is optional. Keep `EXTRACTION_PROVIDER=fake` for deterministi
 local/deployment smoke tests. To test consented remote extraction, set
 `EXTRACTION_PROVIDER=openai` and provide `OPENAI_API_KEY` only to the Python API and
 worker environment.
-

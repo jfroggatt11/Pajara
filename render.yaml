@@ -2,7 +2,7 @@ services:
   - type: web
     name: pajara-api
     runtime: docker
-    plan: starter
+    plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
     dockerContext: .
@@ -26,34 +26,8 @@ services:
         sync: false
       - key: EXTRACTION_PROVIDER
         value: fake
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_EXTRACTION_MODEL
-        value: gpt-5.6-terra
-      - key: OPENAI_TRANSCRIPTION_MODEL
-        value: gpt-4o-mini-transcribe
-
-  - type: worker
-    name: pajara-worker
-    runtime: docker
-    plan: starter
-    region: frankfurt
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: pajara worker
-    autoDeployTrigger: checksPass
-    maxShutdownDelaySeconds: 60
-    envVars:
-      - key: ENVIRONMENT
-        value: production
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SECRET_KEY
-        sync: false
-      - key: SUPABASE_JWT_ISSUER
-        sync: false
-      - key: EXTRACTION_PROVIDER
-        value: fake
+      - key: RUN_WORKER_IN_API
+        value: "true"
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_EXTRACTION_MODEL
@@ -61,4 +35,4 @@ services:
       - key: OPENAI_TRANSCRIPTION_MODEL
         value: gpt-4o-mini-transcribe
       - key: WORKER_NAME
-        value: render-worker
+        value: render-inline-worker

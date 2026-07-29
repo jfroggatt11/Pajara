@@ -136,8 +136,11 @@ The worker:
 - assembles exports;
 - retries transient failures and records terminal failures.
 
-The API and worker are independently scalable processes of the same codebase, not
-separate microservices.
+The package supports independently scalable API and worker processes. For the free
+single-user deployment, `RUN_WORKER_IN_API=true` makes the API claim one durable job
+as a post-response background task whenever a job is queued. This avoids a paid
+always-on worker while preserving the Supabase queue. A later paid deployment turns
+that mode off and runs `pajara worker` separately.
 
 ## 5. Repository layout
 
@@ -700,7 +703,7 @@ environments and are the next operational work.
 **M3.3 Python host**
 
 - multi-stage container, non-root runtime, API/worker commands, health/readiness,
-  CORS/secrets checklist.
+  free inline-worker mode, and CORS/secrets checklist.
 
 **M3.4 Prototype acceptance**
 

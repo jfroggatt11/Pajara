@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     worker_name: str = "pajara-worker"
     worker_poll_seconds: float = Field(default=2.0, ge=0.25, le=60)
     worker_once: bool = False
+    run_worker_in_api: bool = False
     code_version: str = "0.1.0"
 
     @model_validator(mode="after")

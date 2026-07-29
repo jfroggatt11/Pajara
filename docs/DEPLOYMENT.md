@@ -50,38 +50,41 @@ arguments, or the frontend.
 
 The secret key bypasses RLS. It belongs only in the Python API/worker secret store.
 
-## 3. Python API and worker
+## 3. Python API and job processing
 
 ### Render Blueprint
 
 1. Create a Render Blueprint from this repository and `render.yaml`.
-2. Enter all `sync: false` values in the dashboard for both services:
+2. The prototype Blueprint creates one Free web service. Enter:
    - `SUPABASE_URL`
+   - `SUPABASE_PUBLISHABLE_KEY`
    - `SUPABASE_SECRET_KEY` (`sb_secret_…`)
    - `SUPABASE_JWT_ISSUER` (`https://PROJECT.supabase.co/auth/v1`)
-   - `CORS_ORIGINS` on the API
+   - `CORS_ORIGINS` (the exact Netlify production origin)
    - `OPENAI_API_KEY` only if remote AI is enabled
-3. The API additionally needs `SUPABASE_PUBLISHABLE_KEY` for user-scoped Data API
-   calls.
-4. Initially keep `EXTRACTION_PROVIDER=fake`.
-5. Deploy and verify:
+3. Initially keep `EXTRACTION_PROVIDER=fake` and `RUN_WORKER_IN_API=true`.
+4. Deploy and verify:
 
    ```sh
    curl --fail https://YOUR_API_HOST/health
    curl --fail https://YOUR_API_HOST/ready
    ```
 
-6. Confirm the worker is polling without logging job payloads or health inputs.
+5. Queue a job and confirm the API claims it after returning the response, without
+   logging job payloads or health inputs.
 
-For another container host, run the same image twice:
+The Free service spins down after inactivity and can take about one minute to wake.
+This is acceptable for a single-user prototype, not production. Jobs remain durable
+in Supabase. A later paid deployment sets `RUN_WORKER_IN_API=false` and runs the same
+image twice:
 
 ```text
 pajara api
 pajara worker
 ```
 
-Expose only the API process. The worker needs outbound network access but no public
-port.
+Expose only the API process. The separate worker needs outbound network access but no
+public port.
 
 ## 4. Netlify
 

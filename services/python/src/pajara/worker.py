@@ -27,18 +27,25 @@ class Worker:
 
     async def run(self) -> None:
         while True:
-            jobs = await self.client.rpc(
-                "claim_jobs",
-                {"worker_name": self.settings.worker_name, "claim_limit": 1},
-            )
-            if not jobs:
+            processed = await self.run_once()
+            if not processed:
                 if self.settings.worker_once:
                     return
                 await asyncio.sleep(self.settings.worker_poll_seconds)
                 continue
-            await self.process(jobs[0])
             if self.settings.worker_once:
                 return
+
+    async def run_once(self) -> bool:
+        """Atomically claim and process at most one queued job."""
+        jobs = await self.client.rpc(
+            "claim_jobs",
+            {"worker_name": self.settings.worker_name, "claim_limit": 1},
+        )
+        if not jobs:
+            return False
+        await self.process(jobs[0])
+        return True
 
     async def process(self, job: dict[str, Any]) -> None:
         try:
