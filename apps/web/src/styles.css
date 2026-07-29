@@ -161,6 +161,56 @@ details textarea { margin-top: 10px; }
 }
 .compact-empty { padding: 24px; }
 .compact-empty p { margin: 0; }
+.saved-items-header-actions {
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+  max-width: 430px;
+}
+.saved-items-header-actions p { text-align: right; }
+.create-item-card { margin-bottom: 34px; }
+.create-item-card .section-heading { margin-bottom: 0; }
+.review-merge-notice {
+  display: grid;
+  gap: 5px;
+  padding: 14px 16px;
+  border: 1px solid #afd1c2;
+  border-radius: 13px;
+  background: #e9f5ef;
+  color: #285349;
+}
+.review-merge-notice span { font-size: .88rem; line-height: 1.45; }
+.suggestion-button {
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  color: #376d61;
+  padding: 2px 0;
+  font-size: .78rem;
+  font-weight: 700;
+  text-align: left;
+}
+.suggestion-button:hover { text-decoration: underline; }
+.field-help {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.ingredient-evidence {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 13px;
+}
+.ingredient-evidence summary {
+  cursor: pointer;
+  color: #376d61;
+  font-size: .84rem;
+  font-weight: 700;
+}
+.ingredient-evidence p:first-of-type { margin-top: 12px; }
+.ingredient-evidence p:last-child { margin-bottom: 0; }
+.dismiss-extraction { justify-self: start; }
 .choice-list {
   display: grid;
   gap: 10px;
@@ -200,6 +250,8 @@ details textarea { margin-top: 10px; }
   .page-header h1 { font-size: 2.8rem; margin-bottom: 16px; }
   .hero { margin: 0; padding: 54px 22px; min-height: 410px; border-radius: 0 0 30px 30px; }
   .hero h1 { font-size: 3.5rem; }
+  .saved-items-header-actions { justify-items: start; max-width: none; }
+  .saved-items-header-actions p { text-align: left; }
   .notice-grid, .metric-grid, .catalogue-grid { grid-template-columns: 1fr; }
   .form-grid, .score-grid { grid-template-columns: 1fr; }
   .activity-product-areas { grid-template-columns: 1fr; }

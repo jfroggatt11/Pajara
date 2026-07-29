@@ -1,8 +1,12 @@
-import {useCallback, useEffect, useMemo, useState, type FormEvent} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState, type FormEvent} from "react";
 import type {Session} from "@supabase/supabase-js";
 import {apiPost} from "../lib/api";
 import {uploadConceptArtifact} from "../lib/artifacts";
-import {parseIngredientNames} from "../lib/catalogue";
+import {
+  catalogueReviewDefaults,
+  isSameSuggestion,
+  parseIngredientNames,
+} from "../lib/catalogue";
 import {supabase} from "../lib/supabase";
 import type {
   CatalogueExtraction,
@@ -51,12 +55,14 @@ export function Catalogue({
   const [frontPhoto, setFrontPhoto] = useState<File | null>(null);
   const [labelPhoto, setLabelPhoto] = useState<File | null>(null);
   const [requestAi, setRequestAi] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
   const [reviewEdits, setReviewEdits] = useState<
     Record<string, {name: string; brand: string; variant: string; ingredients: string}>
   >({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const initializedCreateState = useRef(false);
 
   const load = useCallback(async () => {
     const [itemsResult, versionsResult, compositionsResult, ingredientsResult, extractionResult] =
@@ -97,7 +103,12 @@ export function Catalogue({
       setError(loadError.message);
       return;
     }
-    setItems((itemsResult.data || []) as CatalogueItem[]);
+    const loadedItems = (itemsResult.data || []) as CatalogueItem[];
+    setItems(loadedItems);
+    if (!initializedCreateState.current) {
+      setShowCreate(loadedItems.length === 0);
+      initializedCreateState.current = true;
+    }
     setVersions((versionsResult.data || []) as ConceptVersion[]);
     setCompositions((compositionsResult.data || []) as CompositionRow[]);
     setIngredientLookup(
@@ -138,6 +149,14 @@ export function Catalogue({
     void load();
   }, [load, refreshKey]);
 
+  useEffect(() => {
+    if (!extractions.some(({status}) => status === "queued" || status === "running")) {
+      return;
+    }
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(timer);
+  }, [extractions, load]);
+
   const currentVersionByConcept = useMemo(
     () =>
       Object.fromEntries(
@@ -145,9 +164,53 @@ export function Catalogue({
       ) as Record<string, ConceptVersion>,
     [versions],
   );
+  const hasActionableReview = extractions.some(
+    ({status}) => status === "queued" || status === "running" || status === "succeeded",
+  );
+
+  function currentIngredientNames(conceptId: string): string[] {
+    const version = currentVersionByConcept[conceptId];
+    return compositions
+      .filter(
+        (row) =>
+          row.owner_concept_id === conceptId
+          && (!version || row.owner_version_id === version.id),
+      )
+      .map((row) => ingredientLookup[row.component_concept_id])
+      .filter(Boolean);
+  }
+
+  function resetCreateForm() {
+    setName("");
+    setBrand("");
+    setVariant("");
+    setCategory("");
+    setForm("");
+    setStrength("");
+    setIngredients("");
+    setFrontPhoto(null);
+    setLabelPhoto(null);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const duplicate = items.find(
+      (item) =>
+        item.canonical_name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase()
+        && (item.attributes.brand || "").trim().toLocaleLowerCase()
+          === brand.trim().toLocaleLowerCase()
+        && (item.attributes.variant || "").trim().toLocaleLowerCase()
+          === variant.trim().toLocaleLowerCase(),
+    );
+    if (
+      duplicate
+      && !window.confirm(
+        `${duplicate.canonical_name} is already saved with the same brand and variant. `
+          + "Create another separate item anyway?",
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     setError(null);
     setSuccess(null);
@@ -219,15 +282,8 @@ export function Catalogue({
           postSaveWarnings.push("the ingredient-label photo did not upload");
         }
       }
-      setName("");
-      setBrand("");
-      setVariant("");
-      setCategory("");
-      setForm("");
-      setStrength("");
-      setIngredients("");
-      setFrontPhoto(null);
-      setLabelPhoto(null);
+      resetCreateForm();
+      setShowCreate(false);
       setSuccess(
         labelPhoto && requestAi && postSaveWarnings.length === 0
           ? "Saved. The label extraction is queued and must be reviewed."
@@ -246,21 +302,20 @@ export function Catalogue({
   }
 
   function extractionEdit(extraction: CatalogueExtraction) {
-    const proposal = extraction.proposal;
+    const item = items.find((candidate) => candidate.id === extraction.concept_id);
     return (
-      reviewEdits[extraction.id] || {
-        name: proposal?.product_name || items.find((item) => item.id === extraction.concept_id)
-          ?.canonical_name || "",
-        brand: proposal?.brand || "",
-        variant: proposal?.variant || "",
-        ingredients: (proposal?.ingredients || []).map((item) => item.name).join("\n"),
-      }
+      reviewEdits[extraction.id]
+      || catalogueReviewDefaults(
+        item,
+        extraction.proposal,
+        currentIngredientNames(extraction.concept_id),
+      )
     );
   }
 
   async function review(
     extraction: CatalogueExtraction,
-    decision: "accepted" | "corrected" | "rejected",
+    decision: "corrected" | "rejected",
   ) {
     const edit = extractionEdit(extraction);
     setBusy(true);
@@ -333,16 +388,67 @@ export function Catalogue({
     }
   }
 
+  async function dismissFailedExtraction(extraction: CatalogueExtraction) {
+    const {error: deleteError} = await supabase
+      .from("catalogue_extractions")
+      .delete()
+      .eq("id", extraction.id)
+      .eq("status", "failed");
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    setSuccess("Failed AI attempt dismissed. The saved item and label image were retained.");
+    await load();
+  }
+
   return (
     <section className="page">
       <header className="page-header">
         <div><span className="eyebrow">Reusable exposures</span><h1>Saved items</h1></div>
-        <p>Create a product once, then select it whenever you use or contact it.</p>
+        <div className="saved-items-header-actions">
+          <p>Create a product once, then select it whenever you use or contact it.</p>
+          {!showCreate && !hasActionableReview && (
+            <button
+              className="primary"
+              onClick={() => {
+                setError(null);
+                setSuccess(null);
+                setShowCreate(true);
+              }}
+            >
+              Add a new item
+            </button>
+          )}
+        </div>
       </header>
+      <StatusMessage error={error} success={success} />
 
-      <form className="stack card" onSubmit={submit}>
-        <h2>Add an item</h2>
-        <div className="form-grid">
+      {showCreate && (
+        <form className="stack card create-item-card" onSubmit={submit}>
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">New catalogue entry</span>
+              <h2>Create a saved item</h2>
+            </div>
+            {items.length > 0 && (
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => {
+                  resetCreateForm();
+                  setShowCreate(false);
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+          <p className="evidence">
+            This creates one reusable item. If you add a label photo, its AI review will
+            update this same item rather than creating another.
+          </p>
+          <div className="form-grid">
           <label>
             Item type
             <select
@@ -398,8 +504,8 @@ export function Catalogue({
               </label>
             </>
           )}
-        </div>
-        <label>
+          </div>
+          <label>
           Known ingredients
           <textarea
             rows={4}
@@ -407,8 +513,8 @@ export function Catalogue({
             onChange={(event) => setIngredients(event.target.value)}
             placeholder="One ingredient per line, or paste a comma-separated list"
           />
-        </label>
-        <div className="form-grid">
+          </label>
+          <div className="form-grid">
           <label className="upload-zone">
             <strong>Front photo</strong>
             <input
@@ -429,54 +535,65 @@ export function Catalogue({
             />
             <span>The original image is retained privately.</span>
           </label>
-        </div>
-        {labelPhoto && (
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={requestAi}
-              onChange={(event) => setRequestAi(event.target.checked)}
-            />
-            <span>
-              Ask AI to read this label. Extracted fields remain proposals until reviewed.
-            </span>
-          </label>
-        )}
-        <StatusMessage error={error} success={success} />
-        <button className="primary" disabled={busy || !name.trim()}>
-          {busy ? "Saving…" : "Save item"}
-        </button>
-      </form>
-
-      <section className="catalogue-section">
-        <div className="section-heading">
-          <div><span className="eyebrow">Human confirmation</span><h2>Label review</h2></div>
-          <button className="secondary small" onClick={() => void load()}>Refresh</button>
-        </div>
-        {extractions.length === 0 ? (
-          <div className="empty compact-empty">
-            <p>No ingredient labels are waiting for review.</p>
           </div>
-        ) : (
+          {labelPhoto && (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={requestAi}
+                onChange={(event) => setRequestAi(event.target.checked)}
+              />
+              <span>
+                Ask AI to read this label. Extracted fields remain proposals until reviewed.
+              </span>
+            </label>
+          )}
+          <button className="primary" disabled={busy || !name.trim()}>
+            {busy ? "Creating…" : "Create saved item"}
+          </button>
+        </form>
+      )}
+
+      {extractions.length > 0 && (
+        <section className="catalogue-section">
+          <div className="section-heading">
+            <div><span className="eyebrow">Human confirmation</span><h2>Label review</h2></div>
+            <button className="secondary small" onClick={() => void load()}>Refresh</button>
+          </div>
           <div className="stack">
             {extractions.map((extraction) => {
               const edit = extractionEdit(extraction);
+              const reviewedItem = items.find((item) => item.id === extraction.concept_id);
               return (
                 <article className="card" key={extraction.id}>
                   <div className="timeline-title">
-                    <h2>{items.find((item) => item.id === extraction.concept_id)
-                      ?.canonical_name || "Product label"}</h2>
+                    <h2>{reviewedItem?.canonical_name || "Product label"}</h2>
                     <span className={`trust ${extraction.status}`}>{extraction.status}</span>
                   </div>
                   {extraction.status === "failed" ? (
-                    <p className="status error">
-                      Extraction failed. Your original image and manually entered data remain
-                      stored.
-                    </p>
+                    <div className="stack">
+                      <p className="status error">
+                        Extraction failed. Your original image and manually entered data remain
+                        stored.
+                      </p>
+                      <button
+                        className="secondary small dismiss-extraction"
+                        onClick={() => void dismissFailedExtraction(extraction)}
+                      >
+                        Dismiss failed attempt
+                      </button>
+                    </div>
                   ) : extraction.status !== "succeeded" ? (
                     <p className="evidence">The worker is processing this private label image.</p>
                   ) : (
                     <div className="stack">
+                      <div className="review-merge-notice">
+                        <strong>Updating the existing saved item</strong>
+                        <span>
+                          Your manually entered information is kept by default. AI suggestions
+                          only change this item after you review and save them here.
+                        </span>
+                      </div>
                       {labelPreviewUrls[extraction.artifact_id] && (
                         <figure className="label-preview">
                           <img
@@ -499,6 +616,23 @@ export function Catalogue({
                                 [extraction.id]: {...edit, name: event.target.value},
                               })}
                           />
+                          {extraction.proposal?.product_name
+                            && !isSameSuggestion(edit.name, extraction.proposal.product_name) && (
+                            <button
+                              type="button"
+                              className="suggestion-button"
+                              onClick={() =>
+                                setReviewEdits({
+                                  ...reviewEdits,
+                                  [extraction.id]: {
+                                    ...edit,
+                                    name: extraction.proposal?.product_name || edit.name,
+                                  },
+                                })}
+                            >
+                              Use AI suggestion: {extraction.proposal.product_name}
+                            </button>
+                          )}
                         </label>
                         <label>
                           Brand
@@ -510,6 +644,23 @@ export function Catalogue({
                                 [extraction.id]: {...edit, brand: event.target.value},
                               })}
                           />
+                          {extraction.proposal?.brand
+                            && !isSameSuggestion(edit.brand, extraction.proposal.brand) && (
+                            <button
+                              type="button"
+                              className="suggestion-button"
+                              onClick={() =>
+                                setReviewEdits({
+                                  ...reviewEdits,
+                                  [extraction.id]: {
+                                    ...edit,
+                                    brand: extraction.proposal?.brand || edit.brand,
+                                  },
+                                })}
+                            >
+                              Use AI suggestion: {extraction.proposal.brand}
+                            </button>
+                          )}
                         </label>
                         <label>
                           Variant
@@ -521,6 +672,23 @@ export function Catalogue({
                                 [extraction.id]: {...edit, variant: event.target.value},
                               })}
                           />
+                          {extraction.proposal?.variant
+                            && !isSameSuggestion(edit.variant, extraction.proposal.variant) && (
+                            <button
+                              type="button"
+                              className="suggestion-button"
+                              onClick={() =>
+                                setReviewEdits({
+                                  ...reviewEdits,
+                                  [extraction.id]: {
+                                    ...edit,
+                                    variant: extraction.proposal?.variant || edit.variant,
+                                  },
+                                })}
+                            >
+                              Use AI suggestion: {extraction.proposal.variant}
+                            </button>
+                          )}
                         </label>
                       </div>
                       <div className="extraction-confidence">
@@ -567,9 +735,15 @@ export function Catalogue({
                               [extraction.id]: {...edit, ingredients: event.target.value},
                             })}
                       />
+                        <span className="field-help">
+                          Existing ingredients are retained and new AI readings are merged in.
+                          Remove a line here only if you intend to remove it from the new
+                          formulation version.
+                        </span>
                       </label>
                       {(extraction.proposal?.ingredients || []).length > 0 && (
-                        <div className="ingredient-evidence">
+                        <details className="ingredient-evidence">
+                          <summary>Show AI ingredient evidence and confidence</summary>
                           {(extraction.proposal?.ingredients || []).map((ingredient, index) => (
                             <p className="evidence" key={`${ingredient.name}-${index}`}>
                               {ingredient.name}: {Math.round(ingredient.confidence * 100)}%
@@ -577,7 +751,7 @@ export function Catalogue({
                               {ingredient.evidence ? ` · “${ingredient.evidence}”` : ""}
                             </p>
                           ))}
-                        </div>
+                        </details>
                       )}
                       {(extraction.proposal?.warnings || []).map((warning) => (
                         <p className="evidence" key={warning}>Warning: {warning}</p>
@@ -590,33 +764,30 @@ export function Catalogue({
                         <button
                           className="primary small"
                           disabled={busy}
-                          onClick={() => void review(extraction, "accepted")}
-                        >
-                          Accept
-                        </button>
-                        <button
-                          className="secondary small"
-                          disabled={busy}
                           onClick={() => void review(extraction, "corrected")}
                         >
-                          Save correction
+                          {busy ? "Saving…" : "Save reviewed label"}
                         </button>
                         <button
                           className="text-button small"
                           disabled={busy}
                           onClick={() => void review(extraction, "rejected")}
                         >
-                          Reject
+                          Discard AI suggestion
                         </button>
                       </div>
+                      <p className="evidence">
+                        Saving updates {reviewedItem?.canonical_name || "this saved item"} and
+                        creates a formulation history entry. It does not create a second item.
+                      </p>
                     </div>
                   )}
                 </article>
               );
             })}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="catalogue-section">
         <div className="section-heading">

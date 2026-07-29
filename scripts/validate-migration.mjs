@@ -159,6 +159,94 @@ if (ownCatalogueItems === 1 && ownReviewedComponents === 2) {
   );
 }
 
+const catalogueArtifact = "30000000-0000-4000-8000-000000000001";
+const catalogueExtraction = "40000000-0000-4000-8000-000000000001";
+await database.exec(`
+  insert into public.artifacts (
+    id, user_id, bucket, object_path, media_type, byte_size, artifact_kind
+  ) values (
+    '${catalogueArtifact}',
+    '${userA}',
+    'input-originals',
+    '${userA}/test-cream/label.jpg',
+    'image/jpeg',
+    1,
+    'ingredient_label'
+  );
+  insert into public.catalogue_extractions (
+    id,
+    user_id,
+    concept_id,
+    artifact_id,
+    provider,
+    model,
+    prompt_version,
+    status,
+    proposal
+  )
+  select
+    '${catalogueExtraction}',
+    '${userA}',
+    id,
+    '${catalogueArtifact}',
+    'fake',
+    'deterministic-v1',
+    'product-label-v1',
+    'succeeded',
+    '{"product_name":null,"brand":null,"variant":null,"ingredients":[]}'::jsonb
+  from public.concepts
+  where user_id = '${userA}' and canonical_name = 'Test cream';
+
+  select public.review_catalogue_extraction(
+    '${catalogueExtraction}',
+    'corrected',
+    null,
+    '',
+    '',
+    '[]'::jsonb
+  );
+`);
+const preservedCatalogueFields = await scalar(`
+  select count(*)
+  from public.concepts
+  where
+    user_id = '${userA}'
+    and canonical_name = 'Test cream'
+    and attributes ->> 'brand' = 'Test brand'
+    and attributes ->> 'form' = 'cream'
+`);
+const preservedVersionSnapshot = await scalar(`
+  select count(*)
+  from public.concept_versions
+  where
+    user_id = '${userA}'
+    and effective_to is null
+    and attributes ->> 'brand' = 'Test brand'
+    and attributes ->> 'form' = 'cream'
+`);
+const preservedCurrentComponents = await scalar(`
+  select count(*)
+  from public.compositions composition
+  join public.concept_versions version
+    on version.id = composition.owner_version_id
+  where
+    composition.user_id = '${userA}'
+    and version.effective_to is null
+`);
+if (
+  preservedCatalogueFields === 1
+  && preservedVersionSnapshot === 1
+  && preservedCurrentComponents === 2
+) {
+  console.log("PASS empty AI fields preserve manual catalogue data: 1");
+} else {
+  failed = true;
+  console.error(
+    "FAIL safe catalogue review: empty AI fields replaced manual data "
+      + `(${preservedCatalogueFields}/${preservedVersionSnapshot}/${preservedCurrentComponents})`,
+  );
+}
+
 if (
   !(await expectDenied(
     "cross-tenant event insert",

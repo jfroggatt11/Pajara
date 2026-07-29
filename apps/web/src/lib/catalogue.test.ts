@@ -1,6 +1,11 @@
 import {describe, expect, it} from "vitest";
 import type {CatalogueItem} from "../types";
-import {parseIngredientNames, sortCatalogueItems} from "./catalogue";
+import {
+  catalogueReviewDefaults,
+  mergeIngredientNames,
+  parseIngredientNames,
+  sortCatalogueItems,
+} from "./catalogue";
 
 function item(
   id: string,
@@ -36,5 +41,37 @@ describe("catalogue helpers", () => {
     ]);
 
     expect(sorted.map(({id}) => id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("preserves trusted manual identity when the image omits it", () => {
+    const defaults = catalogueReviewDefaults(
+      item("cream", "My cream", {
+        brand: "Manually entered brand",
+        variant: "Sensitive",
+      }),
+      {
+        product_name: null,
+        brand: null,
+        variant: null,
+        ingredients: [],
+      },
+      ["Water", "Glycerin"],
+    );
+
+    expect(defaults).toEqual({
+      name: "My cream",
+      brand: "Manually entered brand",
+      variant: "Sensitive",
+      ingredients: "Water\nGlycerin",
+    });
+  });
+
+  it("adds extracted ingredients without dropping manual ingredients", () => {
+    expect(
+      mergeIngredientNames(
+        ["Water", "Glycerin"],
+        ["Aqua", "GLYCERIN", "Citric acid"],
+      ),
+    ).toEqual(["Aqua", "GLYCERIN", "Citric acid", "Water"]);
   });
 });
