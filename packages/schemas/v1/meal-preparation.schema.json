@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pajara.app/schemas/v1/meal-preparation.schema.json",
+  "title": "Meal preparation attributes",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["prepared_by_user"],
+  "properties": {
+    "prepared_by_user": {"type": "boolean"},
+    "original_text": {"type": ["string", "null"]},
+    "gloves_used": {"type": ["boolean", "null"]},
+    "glove_material": {"type": ["string", "null"]},
+    "splash_or_spill": {"type": ["boolean", "null"]},
+    "handled_ingredients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "body_area_codes", "contact_state"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "body_area_codes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1
+          },
+          "contact_state": {
+            "enum": ["raw", "raw_wet", "wet", "dry", "cooked", "diluted", "unknown"]
+          },
+          "duration_seconds": {"type": ["integer", "null"], "minimum": 0},
+          "direct_contact": {"enum": ["yes", "no", "unknown"]}
+        }
+      }
+    },
+    "cleanup_notes": {"type": ["string", "null"]}
+  }
+}
+

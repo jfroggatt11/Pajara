@@ -1,0 +1,18 @@
+{
+  "prepared_by_user": true,
+  "original_text": "Made tomato pasta. I chopped the tomatoes without gloves.",
+  "gloves_used": false,
+  "glove_material": null,
+  "splash_or_spill": false,
+  "handled_ingredients": [
+    {
+      "name": "tomato",
+      "body_area_codes": ["both_hands"],
+      "contact_state": "raw_wet",
+      "duration_seconds": 180,
+      "direct_contact": "yes"
+    }
+  ],
+  "cleanup_notes": "Washed with kitchen hand soap."
+}
+

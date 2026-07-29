@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pajara.app/schemas/v1/observation.schema.json",
+  "title": "Observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type_code", "type_version", "observed_at"],
+  "properties": {
+    "type_code": {
+      "enum": [
+        "redness",
+        "itching",
+        "dryness",
+        "cracking",
+        "swelling",
+        "pain",
+        "sleep_duration",
+        "stress_level",
+        "temperature",
+        "relative_humidity"
+      ]
+    },
+    "type_version": {"const": 1},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "body_area_code": {"type": ["string", "null"]},
+    "numeric_value": {"type": ["number", "null"]},
+    "text_value": {"type": ["string", "null"]},
+    "boolean_value": {"type": ["boolean", "null"]},
+    "categorical_value": {"type": ["string", "null"]},
+    "json_value": {"type": ["object", "array", "null"]},
+    "unit": {"type": ["string", "null"]},
+    "scale_code": {"type": ["string", "null"]},
+    "scale_min": {"type": ["number", "null"]},
+    "scale_max": {"type": ["number", "null"]},
+    "attributes": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type_code": {
+            "enum": ["redness", "itching", "dryness", "cracking", "swelling", "pain"]
+          }
+        }
+      },
+      "then": {
+        "required": ["numeric_value", "scale_code", "scale_min", "scale_max"],
+        "properties": {
+          "numeric_value": {"type": "number", "minimum": 0, "maximum": 10},
+          "scale_code": {"const": "symptom_0_10_v1"},
+          "scale_min": {"const": 0},
+          "scale_max": {"const": 10}
+        }
+      }
+    }
+  ]
+}
+

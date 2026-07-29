@@ -1,0 +1,18 @@
+{
+  "name": "pajara",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "check:db": "node scripts/validate-migration.mjs",
+    "test:web": "npm --workspace apps/web run test",
+    "check:web": "npm --workspace apps/web run check"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
+    "supabase": "^2.110.0"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pajara.app/schemas/v1/extraction-proposal.schema.json",
+  "title": "Extraction proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "assertions", "warnings"],
+  "properties": {
+    "summary": {"type": "string"},
+    "assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field_path", "proposed_value", "confidence", "evidence"],
+        "properties": {
+          "field_path": {
+            "type": "string",
+            "pattern": "^/(attributes/[A-Za-z0-9_-]+|label)$"
+          },
+          "proposed_value": {},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "evidence": {"type": "string"},
+          "provenance_method": {
+            "enum": ["manual", "transcribed", "vision", "parsed_text", "normalized"]
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
+

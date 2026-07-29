@@ -1,0 +1,43 @@
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check:web
+      - run: npm run test:web
+      - run: npm run build:web
+      - run: npm run check:db
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.6"
+          enable-cache: true
+      - run: uv sync --frozen --all-groups
+        working-directory: services/python
+      - run: uv run ruff format --check .
+        working-directory: services/python
+      - run: uv run ruff check .
+        working-directory: services/python
+      - run: uv run mypy src tests
+        working-directory: services/python
+      - run: uv run pytest
+        working-directory: services/python

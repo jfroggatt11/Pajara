@@ -1,51 +1,69 @@
 # Pajara
 
-Pajara is a local-first personal dermatitis tracking and hypothesis-generation tool.
-It is intended to help one person collect structured observations and explore
-uncertain associations. It does not diagnose conditions, establish causes, or advise
-medication changes.
+Pajara is a private personal dermatitis tracker for structured capture, AI-assisted
+organization, and cautious within-person pattern exploration. It does not diagnose
+conditions, establish causes, or advise medication changes.
 
-The accepted architecture and phased roadmap are in
-[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+## Prototype architecture
 
-## Current status
+- `apps/web`: React/Vite PWA deployed to Netlify
+- `supabase`: Auth, Postgres migrations, RLS, private Storage, and durable jobs
+- `services/python`: FastAPI API plus background worker for extraction, analysis,
+  reports, and exports
+- `packages/schemas`: shared versioned JSON Schemas
 
-Milestone M0.1 provides the application skeleton and quality gates. Domain schemas,
-database persistence, capture workflows, AI extraction, and analysis will be added in
-later independently testable milestones.
+See [the full implementation plan](docs/IMPLEMENTATION_PLAN.md) and
+[the deployment runbook](docs/DEPLOYMENT.md).
 
-## Prerequisites
+## Local setup
 
+Prerequisites:
+
+- Node.js 22
 - Python 3.13
-- [uv](https://docs.astral.sh/uv/)
+- `uv`
+- Docker and the Supabase CLI for the full local stack
 
-## Set up and run
-
-```sh
-uv sync --all-groups
-uv run pajara
-```
-
-Then open <http://127.0.0.1:8000>. The server binds to loopback by default.
-
-For development reload:
+Install dependencies:
 
 ```sh
-uv run pajara --reload
+make install
 ```
 
-## Quality checks
+Copy the example environments:
+
+```sh
+cp apps/web/.env.example apps/web/.env
+cp services/python/.env.example services/python/.env
+```
+
+Start Supabase and apply the migration/seed:
+
+```sh
+npx supabase start
+npx supabase db reset
+```
+
+Use the local credentials printed by Supabase in both `.env` files, then run these in
+separate terminals:
+
+```sh
+make dev-web
+make dev-api
+make dev-worker
+```
+
+The web app runs at <http://localhost:5173>; the API health endpoint is
+<http://localhost:8000/health>.
+
+## Checks
 
 ```sh
 make check
 ```
 
-Individual commands are:
-
-```sh
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy src tests
-uv run pytest
-```
+The OpenAI adapter is optional. Keep `EXTRACTION_PROVIDER=fake` for deterministic
+local/deployment smoke tests. To test consented remote extraction, set
+`EXTRACTION_PROVIDER=openai` and provide `OPENAI_API_KEY` only to the Python API and
+worker environment.
 

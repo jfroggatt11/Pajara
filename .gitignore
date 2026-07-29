@@ -4,10 +4,12 @@
 .pytest_cache/
 .ruff_cache/
 .venv/
+node_modules/
 __pycache__/
 *.py[cod]
+*.tsbuildinfo
 *.sqlite3
 data/
 dist/
+apps/web/dist/
 htmlcov/
-

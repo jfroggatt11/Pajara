@@ -1,18 +1,31 @@
-.PHONY: check format run test
+.PHONY: build check dev-api dev-web dev-worker install test
 
-run:
-	uv run pajara
+install:
+	npm install
+	cd services/python && uv sync --all-groups
+
+dev-web:
+	npm run dev:web
+
+dev-api:
+	cd services/python && uv run pajara api --reload
+
+dev-worker:
+	cd services/python && uv run pajara worker
 
 test:
-	uv run pytest
+	npm run test:web
+	cd services/python && uv run pytest
 
-format:
-	uv run ruff format .
-	uv run ruff check --fix .
+build:
+	npm run build:web
 
 check:
-	uv run ruff format --check .
-	uv run ruff check .
-	uv run mypy src tests
-	uv run pytest
-
+	npm run check:web
+	npm run test:web
+	npm run build:web
+	npm run check:db
+	cd services/python && .venv/bin/ruff format --check .
+	cd services/python && .venv/bin/ruff check .
+	cd services/python && .venv/bin/mypy src tests
+	cd services/python && .venv/bin/pytest

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pajara.app/schemas/v1/event.schema.json",
+  "title": "Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type_code",
+    "type_version",
+    "occurred_start",
+    "recorded_timezone",
+    "time_precision",
+    "attributes"
+  ],
+  "properties": {
+    "type_code": {
+      "type": "string",
+      "enum": [
+        "skin_check",
+        "meal",
+        "meal_preparation",
+        "skin_contact",
+        "product_use",
+        "topical_treatment",
+        "medication",
+        "activity",
+        "note",
+        "sleep",
+        "stress",
+        "illness",
+        "environmental_exposure"
+      ]
+    },
+    "type_version": {"const": 1},
+    "occurred_start": {"type": "string", "format": "date-time"},
+    "occurred_end": {"type": ["string", "null"], "format": "date-time"},
+    "recorded_timezone": {"type": "string", "minLength": 1},
+    "time_precision": {
+      "enum": ["exact", "minute", "hour", "part_of_day", "day", "range", "unknown"]
+    },
+    "label": {"type": ["string", "null"], "maxLength": 240},
+    "attributes": {"type": "object"}
+  }
+}
+

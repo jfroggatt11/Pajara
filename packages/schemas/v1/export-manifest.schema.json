@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pajara.app/schemas/v1/export-manifest.schema.json",
+  "title": "Pajara export manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "created_at", "user_id", "files"],
+  "properties": {
+    "format_version": {"const": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "user_id": {"type": "string", "format": "uuid"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "bytes"],
+        "properties": {
+          "path": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}
+

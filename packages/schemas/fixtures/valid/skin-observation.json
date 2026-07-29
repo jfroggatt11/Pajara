@@ -1,0 +1,16 @@
+{
+  "type_code": "itching",
+  "type_version": 1,
+  "observed_at": "2026-07-29T06:45:00Z",
+  "body_area_code": "left_hand",
+  "numeric_value": 5,
+  "text_value": null,
+  "boolean_value": null,
+  "categorical_value": null,
+  "json_value": null,
+  "unit": null,
+  "scale_code": "symptom_0_10_v1",
+  "scale_min": 0,
+  "scale_max": 10,
+  "attributes": {}
+}
