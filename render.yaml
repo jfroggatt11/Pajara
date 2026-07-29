@@ -25,13 +25,15 @@ services:
       - key: SUPABASE_JWT_ISSUER
         sync: false
       - key: EXTRACTION_PROVIDER
-        value: fake
+        value: openai
       - key: RUN_WORKER_IN_API
         value: "true"
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_EXTRACTION_MODEL
-        value: gpt-5.6-terra
+        value: gpt-4.1-mini
+      - key: OPENAI_PRODUCT_LABEL_MODEL
+        value: gpt-5.4-mini
       - key: OPENAI_TRANSCRIPTION_MODEL
         value: gpt-4o-mini-transcribe
       - key: WORKER_NAME

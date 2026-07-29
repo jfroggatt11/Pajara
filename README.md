@@ -67,4 +67,7 @@ make check
 The OpenAI adapter is optional. Keep `EXTRACTION_PROVIDER=fake` for deterministic
 local/deployment smoke tests. To test consented remote extraction, set
 `EXTRACTION_PROVIDER=openai` and provide `OPENAI_API_KEY` only to the Python API and
-worker environment.
+worker environment. The production Blueprint defaults to low-cost routing:
+`gpt-4.1-mini` for routine text extraction, `gpt-5.4-mini` for photographed product
+labels, and local Moonshine transcription with `gpt-4o-mini-transcribe` available
+only as an explicitly requested backend fallback.

@@ -162,7 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "artifact_id": str(request.artifact_id),
                 "provider": active_settings.extraction_provider,
                 "model": (
-                    active_settings.openai_extraction_model
+                    active_settings.openai_product_label_model
                     if active_settings.extraction_provider == "openai"
                     else "deterministic-v1"
                 ),

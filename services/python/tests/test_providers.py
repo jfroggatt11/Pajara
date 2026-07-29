@@ -1,5 +1,6 @@
 """Extraction provider contract tests."""
 
+from pajara.config import Settings
 from pajara.providers import FakeExtractionProvider
 
 
@@ -30,3 +31,11 @@ def test_fake_label_provider_preserves_review_boundary() -> None:
 
     assert proposal.ingredients == []
     assert proposal.warnings
+
+
+def test_low_cost_openai_model_defaults_are_separated_by_task() -> None:
+    settings = Settings()
+
+    assert settings.openai_extraction_model == "gpt-4.1-mini"
+    assert settings.openai_product_label_model == "gpt-5.4-mini"
+    assert settings.openai_transcription_model == "gpt-4o-mini-transcribe"

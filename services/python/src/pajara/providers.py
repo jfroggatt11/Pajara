@@ -39,6 +39,10 @@ class ExtractionProvider(ABC):
     name: str
     model: str
 
+    @property
+    def product_label_model(self) -> str:
+        return self.model
+
     @abstractmethod
     def extract(self, event_type: str, source_text: str) -> ExtractionProposal:
         """Extract a structured proposal from source text."""
@@ -111,7 +115,12 @@ class OpenAIExtractionProvider(ExtractionProvider):
             raise ValueError("OPENAI_API_KEY is required for the OpenAI provider")
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_extraction_model
+        self._product_label_model = settings.openai_product_label_model
         self.transcription_model = settings.openai_transcription_model
+
+    @property
+    def product_label_model(self) -> str:
+        return self._product_label_model
 
     def extract(self, event_type: str, source_text: str) -> ExtractionProposal:
         response = self.client.responses.parse(
@@ -155,7 +164,7 @@ class OpenAIExtractionProvider(ExtractionProvider):
             ],
         )
         response = self.client.responses.parse(
-            model=self.model,
+            model=self.product_label_model,
             instructions=PRODUCT_LABEL_INSTRUCTIONS,
             input=request_input,
             text_format=ProductLabelProposal,

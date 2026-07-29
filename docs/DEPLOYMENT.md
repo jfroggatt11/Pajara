@@ -65,8 +65,13 @@ The secret key bypasses RLS. It belongs only in the Python API/worker secret sto
    - `SUPABASE_SECRET_KEY` (`sb_secret_…`)
    - `SUPABASE_JWT_ISSUER` (`https://PROJECT.supabase.co/auth/v1`)
    - `CORS_ORIGINS` (the exact Netlify production origin)
-   - `OPENAI_API_KEY` only if remote AI is enabled
-3. Initially keep `EXTRACTION_PROVIDER=fake` and `RUN_WORKER_IN_API=true`.
+   - `OPENAI_API_KEY` as a Render secret (`sk-…`); never expose it to Netlify
+3. Keep the Blueprint defaults `EXTRACTION_PROVIDER=openai` and
+   `RUN_WORKER_IN_API=true`. The low-cost model routing defaults are:
+   - `OPENAI_EXTRACTION_MODEL=gpt-4.1-mini` for routine text extraction;
+   - `OPENAI_PRODUCT_LABEL_MODEL=gpt-5.4-mini` for photographed labels;
+   - `OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe` only when the user
+     explicitly requests backend fallback.
 4. Deploy and verify:
 
    ```sh
@@ -77,10 +82,13 @@ The secret key bypasses RLS. It belongs only in the Python API/worker secret sto
 5. Queue a job and confirm the API claims it after returning the response, without
    logging job payloads or health inputs.
 
-To read photographed ingredient labels, change `EXTRACTION_PROVIDER` to `openai`, add
-the server-only `OPENAI_API_KEY`, and redeploy Render. With `fake`, catalogue items,
-manual ingredients, images, and logging still work, but image extraction returns an
-explicit warning rather than pretending to read the label.
+The Blueprint enables remote extraction by default. Add the server-only
+`OPENAI_API_KEY` in the Render service's **Environment** settings and redeploy. Render
+passes the same environment to the inline worker. If the API and worker are later
+split into separate Render services, add the secret to both services. To disable all
+remote AI without changing the application, set `EXTRACTION_PROVIDER=fake`; catalogue
+items, manual ingredients, images, and logging still work, but image extraction
+returns an explicit warning rather than pretending to read the label.
 
 The Free service spins down after inactivity and can take about one minute to wake.
 This is acceptable for a single-user prototype, not production. Jobs remain durable

@@ -31,7 +31,10 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str | None = None
 
     openai_api_key: str | None = None
-    openai_extraction_model: str = "gpt-5.6-terra"
+    # Routine text extraction is deliberately assigned to the inexpensive model.
+    # Label OCR gets a separate, stronger vision-capable model.
+    openai_extraction_model: str = "gpt-4.1-mini"
+    openai_product_label_model: str = "gpt-5.4-mini"
     openai_transcription_model: str = "gpt-4o-mini-transcribe"
     extraction_provider: str = "fake"
 

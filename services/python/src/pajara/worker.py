@@ -146,7 +146,7 @@ class Worker:
                 "status": "running",
                 "started_at": datetime.now(UTC).isoformat(),
                 "provider": self.provider.name,
-                "model": self.provider.model,
+                "model": self.provider.product_label_model,
             },
         )
         content = await self.client.download(artifact["bucket"], artifact["object_path"])
