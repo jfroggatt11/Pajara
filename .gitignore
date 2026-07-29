@@ -5,6 +5,7 @@
 .ruff_cache/
 .venv/
 node_modules/
+supabase/.temp/
 __pycache__/
 *.py[cod]
 *.tsbuildinfo

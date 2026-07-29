@@ -92,7 +92,7 @@ Responsibilities:
 - clear offline/error/pending states.
 
 Netlify receives only public frontend configuration. It must never receive or bundle
-the Supabase service-role key or the AI provider key.
+the Supabase secret/admin key or the AI provider key.
 
 ### 4.2 Supabase data plane
 

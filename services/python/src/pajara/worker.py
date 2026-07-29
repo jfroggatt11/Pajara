@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 class Worker:
     def __init__(self, settings: Settings, provider: ExtractionProvider | None = None) -> None:
-        if not settings.supabase_url or not settings.supabase_service_role_key:
+        if not settings.supabase_url or not settings.supabase_admin_key:
             raise ValueError("Supabase service configuration is required for the worker")
         self.settings = settings
-        self.client = SupabaseClient(settings.supabase_url, settings.supabase_service_role_key)
+        self.client = SupabaseClient(settings.supabase_url, settings.supabase_admin_key)
         self.provider = provider or build_provider(settings)
 
     async def run(self) -> None:

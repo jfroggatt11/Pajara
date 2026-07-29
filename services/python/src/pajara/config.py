@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     supabase_url: str | None = None
     supabase_publishable_key: str | None = None
+    supabase_secret_key: str | None = None
+    # Legacy JWT key. New deployments should use SUPABASE_SECRET_KEY.
     supabase_service_role_key: str | None = None
     supabase_jwt_issuer: str | None = None
     supabase_jwt_audience: str = "authenticated"
@@ -52,11 +54,15 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
+    def supabase_admin_key(self) -> str | None:
+        return self.supabase_secret_key or self.supabase_service_role_key
+
+    @property
     def backend_ready(self) -> bool:
         return bool(
             self.supabase_url
             and self.supabase_publishable_key
-            and self.supabase_service_role_key
+            and self.supabase_admin_key
             and self.supabase_jwt_issuer
         )
 

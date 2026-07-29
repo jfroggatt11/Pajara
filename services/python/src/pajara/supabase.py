@@ -14,15 +14,19 @@ class SupabaseClient:
     def __init__(self, url: str, api_key: str, bearer_token: str | None = None) -> None:
         self.url = url.rstrip("/")
         self.api_key = api_key
-        self.bearer_token = bearer_token or api_key
+        self.bearer_token = bearer_token
+        if bearer_token is None and not api_key.startswith("sb_secret_"):
+            self.bearer_token = api_key
 
     @property
     def headers(self) -> dict[str, str]:
-        return {
+        headers = {
             "apikey": self.api_key,
-            "Authorization": f"Bearer {self.bearer_token}",
             "Content-Type": "application/json",
         }
+        if self.bearer_token:
+            headers["Authorization"] = f"Bearer {self.bearer_token}"
+        return headers
 
     async def select(
         self,
@@ -101,8 +105,7 @@ class SupabaseClient:
     ) -> None:
         safe_path = quote(path, safe="/")
         headers = {
-            "apikey": self.api_key,
-            "Authorization": f"Bearer {self.bearer_token}",
+            **self.headers,
             "Content-Type": media_type,
             "x-upsert": "false",
         }

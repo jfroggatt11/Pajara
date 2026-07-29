@@ -45,11 +45,10 @@ arguments, or the frontend.
    - configure production SMTP before relying on email login outside the project team.
 6. Verify `skin-originals`, `voice-originals`, `input-originals`, and
    `derived-private` are all private.
-7. Copy the Project URL, publishable key, and server-only service-role key.
+7. Copy the Project URL, publishable key, and server-only secret key.
 8. Run two-user RLS checks before storing real data.
 
-The service-role key bypasses RLS. It belongs only in the Python API/worker secret
-store.
+The secret key bypasses RLS. It belongs only in the Python API/worker secret store.
 
 ## 3. Python API and worker
 
@@ -58,7 +57,7 @@ store.
 1. Create a Render Blueprint from this repository and `render.yaml`.
 2. Enter all `sync: false` values in the dashboard for both services:
    - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `SUPABASE_SECRET_KEY` (`sb_secret_…`)
    - `SUPABASE_JWT_ISSUER` (`https://PROJECT.supabase.co/auth/v1`)
    - `CORS_ORIGINS` on the API
    - `OPENAI_API_KEY` only if remote AI is enabled
@@ -97,7 +96,7 @@ port.
    - Supabase Auth Site URL and redirect allowlist;
    - Python `CORS_ORIGINS`.
 5. Redeploy the Python API after changing CORS.
-6. Inspect the production JavaScript bundle and confirm it contains no service-role or
+6. Inspect the production JavaScript bundle and confirm it contains no secret/admin or
    AI key.
 
 ## 5. Acceptance test
