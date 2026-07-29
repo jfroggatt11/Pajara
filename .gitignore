@@ -12,5 +12,7 @@ __pycache__/
 *.sqlite3
 data/
 dist/
+!vendor/moonshine-js/dist/
+!vendor/moonshine-js/dist/moonshine.min.js
 apps/web/dist/
 htmlcov/
