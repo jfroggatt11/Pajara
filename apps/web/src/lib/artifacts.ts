@@ -40,15 +40,15 @@ interface ArtifactLinkOptions {
   capturedAt?: string;
 }
 
-export async function uploadArtifact(
+async function storeArtifact(
   session: Session,
-  eventId: string,
+  ownerId: string,
   file: File,
   bucket: "skin-originals" | "voice-originals" | "input-originals",
-  role: "skin_photo" | "voice_note" | "original_input",
-  options: ArtifactLinkOptions = {},
+  artifactKind: string,
+  capturedAt?: string,
 ): Promise<string> {
-  const objectPath = `${session.user.id}/${eventId}/${crypto.randomUUID()}-${sanitizeFilename(file.name)}`;
+  const objectPath = `${session.user.id}/${ownerId}/${crypto.randomUUID()}-${sanitizeFilename(file.name)}`;
   const mediaType = inferMediaType(file);
   const {error: uploadError} = await supabase.storage.from(bucket).upload(objectPath, file, {
     contentType: mediaType,
@@ -67,23 +67,69 @@ export async function uploadArtifact(
       media_type: mediaType,
       byte_size: file.size,
       original_filename: file.name,
-      artifact_kind: role,
-      captured_at: options.capturedAt || new Date().toISOString(),
+      artifact_kind: artifactKind,
+      captured_at: capturedAt || new Date().toISOString(),
       metadata: {},
     })
     .select()
     .single();
   if (artifactError) throw artifactError;
+  return artifact.id as string;
+}
+
+export async function uploadArtifact(
+  session: Session,
+  eventId: string,
+  file: File,
+  bucket: "skin-originals" | "voice-originals" | "input-originals",
+  role: "skin_photo" | "voice_note" | "original_input",
+  options: ArtifactLinkOptions = {},
+): Promise<string> {
+  const artifactId = await storeArtifact(
+    session,
+    eventId,
+    file,
+    bucket,
+    role,
+    options.capturedAt,
+  );
 
   const {error: linkError} = await supabase.from("record_artifacts").insert({
     user_id: session.user.id,
     event_id: eventId,
-    artifact_id: artifact.id,
+    artifact_id: artifactId,
     role,
     body_area_code: options.bodyAreaCode || null,
     view_code: options.viewCode || null,
     display_order: options.displayOrder || 0,
   });
   if (linkError) throw linkError;
-  return artifact.id as string;
+  return artifactId;
+}
+
+export async function uploadConceptArtifact(
+  session: Session,
+  conceptId: string,
+  conceptVersionId: string | null,
+  file: File,
+  role: "product_front" | "ingredient_label",
+  displayOrder = 0,
+): Promise<string> {
+  const artifactId = await storeArtifact(
+    session,
+    conceptId,
+    file,
+    "input-originals",
+    role,
+  );
+  const {error: linkError} = await supabase.from("concept_artifacts").insert({
+    user_id: session.user.id,
+    concept_id: conceptId,
+    concept_version_id: conceptVersionId,
+    artifact_id: artifactId,
+    role,
+    display_order: displayOrder,
+  });
+  if (linkError) throw linkError;
+  return artifactId;
 }

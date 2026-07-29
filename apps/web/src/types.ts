@@ -2,6 +2,7 @@ export type View =
   | "home"
   | "checkin"
   | "log"
+  | "catalogue"
   | "review"
   | "timeline"
   | "photos"
@@ -62,4 +63,63 @@ export interface FieldAssertion {
     provider: string;
     event_id: string;
   };
+}
+
+export type CatalogueItemType = "product" | "medication" | "treatment";
+
+export interface CatalogueItem {
+  id: string;
+  user_id: string;
+  concept_type: CatalogueItemType;
+  canonical_name: string;
+  attributes: {
+    brand?: string;
+    variant?: string;
+    category?: string;
+    form?: string;
+    strength?: string;
+    favorite?: boolean;
+    last_used_at?: string;
+  };
+  archived_at: string | null;
+  created_at: string;
+}
+
+export interface ConceptVersion {
+  id: string;
+  concept_id: string;
+  version_number: number;
+  effective_from: string;
+  effective_to: string | null;
+  attributes: Record<string, unknown>;
+  review_state: string;
+}
+
+export interface CatalogueExtraction {
+  id: string;
+  concept_id: string;
+  artifact_id: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  review_state: "proposed" | "accepted" | "corrected" | "rejected" | "superseded";
+  provider: string;
+  model: string;
+  proposal: {
+    product_name?: string | null;
+    product_name_confidence?: number | null;
+    product_name_evidence?: string | null;
+    brand?: string | null;
+    brand_confidence?: number | null;
+    brand_evidence?: string | null;
+    variant?: string | null;
+    variant_confidence?: number | null;
+    variant_evidence?: string | null;
+    ingredients?: Array<{
+      name: string;
+      confidence: number;
+      evidence: string;
+    }>;
+    warnings?: string[];
+  } | null;
+  error: string | null;
+  created_at: string;
 }

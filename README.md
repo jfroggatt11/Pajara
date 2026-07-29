@@ -10,6 +10,8 @@ conditions, establish causes, or advise medication changes.
 - `supabase`: Auth, Postgres migrations, RLS, private Storage, and durable jobs
 - `services/python`: FastAPI API with free inline job processing or a separately
   deployable worker for extraction, analysis, reports, and exports
+- reusable, versioned medications, treatments, and personal/household products with
+  private ingredient-label capture and human-reviewed AI extraction
 - `packages/schemas`: shared versioned JSON Schemas
 
 See [the full implementation plan](docs/IMPLEMENTATION_PLAN.md) and

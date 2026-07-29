@@ -1,16 +1,18 @@
-import {readFile} from "node:fs/promises";
+import {readdir, readFile} from "node:fs/promises";
 import {PGlite} from "@electric-sql/pglite";
 
 const database = new PGlite();
-const migrationSource = await readFile(
-  new URL("../supabase/migrations/202607290001_initial_schema.sql", import.meta.url),
-  "utf8",
-);
-// PGlite exposes gen_random_uuid() from core Postgres but does not bundle the
-// pgcrypto extension control file. Hosted Supabase includes pgcrypto.
-const migration = migrationSource.replace(
-  "create extension if not exists pgcrypto;",
-  "",
+const migrationsDirectory = new URL("../supabase/migrations/", import.meta.url);
+const migrationFiles = (await readdir(migrationsDirectory))
+  .filter((filename) => filename.endsWith(".sql"))
+  .sort();
+const migrations = await Promise.all(
+  migrationFiles.map(async (filename) => {
+    const source = await readFile(new URL(filename, migrationsDirectory), "utf8");
+    // PGlite exposes gen_random_uuid() from core Postgres but does not bundle the
+    // pgcrypto extension control file. Hosted Supabase includes pgcrypto.
+    return source.replace("create extension if not exists pgcrypto;", "");
+  }),
 );
 const seed = await readFile(new URL("../supabase/seed.sql", import.meta.url), "utf8");
 
@@ -53,7 +55,7 @@ await database.exec(`
   $$;
 `);
 
-await database.exec(migration);
+for (const migration of migrations) await database.exec(migration);
 await database.exec(seed);
 
 async function scalar(query) {
@@ -73,8 +75,8 @@ async function expectDenied(label, query) {
 }
 
 const assertions = [
-  ["application tables", await scalar("select count(*) from information_schema.tables where table_schema = 'public'"), 18],
-  ["RLS policies", await scalar("select count(*) from pg_policies where schemaname in ('public', 'storage')"), 30],
+  ["application tables", await scalar("select count(*) from information_schema.tables where table_schema = 'public'"), 21],
+  ["RLS policies", await scalar("select count(*) from pg_policies where schemaname in ('public', 'storage')"), 33],
   ["private buckets", await scalar("select count(*) from storage.buckets where public = false"), 4],
   ["body areas", await scalar("select count(*) from public.body_areas"), 20],
   ["type definitions", await scalar("select count(*) from public.type_definitions"), 15],
@@ -82,6 +84,8 @@ const assertions = [
   ["job claim function", await scalar("select count(*) from pg_proc where proname = 'claim_jobs'"), 1],
   ["review function", await scalar("select count(*) from pg_proc where proname = 'review_field_assertion'"), 1],
   ["deletion function", await scalar("select count(*) from pg_proc where proname = 'delete_user_tracking_data'"), 1],
+  ["catalogue review function", await scalar("select count(*) from pg_proc where proname = 'review_catalogue_extraction'"), 1],
+  ["catalogue create function", await scalar("select count(*) from pg_proc where proname = 'create_catalogue_item'"), 1],
 ];
 
 let failed = false;
@@ -96,12 +100,15 @@ for (const [label, actual, minimum] of assertions) {
 
 const userA = "00000000-0000-4000-8000-000000000001";
 const userB = "00000000-0000-4000-8000-000000000002";
+const userBConcept = "20000000-0000-4000-8000-000000000002";
 
 await database.exec(`
   insert into auth.users (id) values ('${userA}'), ('${userB}');
   insert into public.profiles (user_id, display_name)
   values ('${userA}', 'User A'), ('${userB}', 'User B');
-  grant usage on schema public, storage to authenticated;
+  insert into public.concepts (id, user_id, concept_type, canonical_name)
+  values ('${userBConcept}', '${userB}', 'product', 'User B private product');
+  grant usage on schema public, storage, auth to authenticated;
   grant select, insert, update, delete on all tables in schema public to authenticated;
   grant select, insert, update, delete on storage.objects to authenticated;
   set role authenticated;
@@ -127,6 +134,31 @@ await database.exec(`
 `);
 console.log("PASS owner event insert: 1");
 
+await database.exec(`
+  select public.create_catalogue_item(
+    'treatment',
+    'Test cream',
+    '{"brand":"Test brand","form":"cream"}'::jsonb,
+    '["Water","Glycerin"]'::jsonb
+  );
+`);
+const ownCatalogueItems = await scalar(`
+  select count(*) from public.concepts
+  where user_id = '${userA}' and concept_type = 'treatment'
+`);
+const ownReviewedComponents = await scalar(`
+  select count(*) from public.compositions
+  where user_id = '${userA}' and review_state = 'accepted'
+`);
+if (ownCatalogueItems === 1 && ownReviewedComponents === 2) {
+  console.log("PASS catalogue item and composition creation: 1");
+} else {
+  failed = true;
+  console.error(
+    `FAIL catalogue creation: expected 1 item/2 components, found ${ownCatalogueItems}/${ownReviewedComponents}`,
+  );
+}
+
 if (
   !(await expectDenied(
     "cross-tenant event insert",
@@ -135,6 +167,21 @@ if (
         user_id, type_code, occurred_start, recorded_timezone, trust_status
       ) values (
         '${userB}', 'note', '2026-07-29T09:00:00Z', 'Europe/Rome', 'trusted'
+      )
+    `,
+  ))
+) {
+  failed = true;
+}
+
+if (
+  !(await expectDenied(
+    "cross-tenant catalogue version",
+    `
+      insert into public.concept_versions (
+        user_id, concept_id, version_number, attributes
+      ) values (
+        '${userA}', '${userBConcept}', 1, '{}'::jsonb
       )
     `,
   ))

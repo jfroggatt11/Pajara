@@ -80,6 +80,21 @@ class Worker:
                         logger.exception(
                             "Could not restore failed extraction target to trusted manual data"
                         )
+            if not retry and job.get("job_type") == "catalogue_extraction":
+                extraction_id = job.get("payload", {}).get("catalogue_extraction_id")
+                if extraction_id:
+                    try:
+                        await self.client.update(
+                            "catalogue_extractions",
+                            f"id=eq.{extraction_id}&user_id=eq.{job['user_id']}",
+                            {
+                                "status": "failed",
+                                "error": f"{type(exc).__name__}: processing failed",
+                                "completed_at": datetime.now(UTC).isoformat(),
+                            },
+                        )
+                    except Exception:
+                        logger.exception("Could not mark catalogue extraction as failed")
             await self.client.update(
                 "jobs",
                 f"id=eq.{job['id']}",
@@ -97,6 +112,7 @@ class Worker:
     async def _dispatch(self, job: dict[str, Any]) -> dict[str, Any]:
         handlers = {
             "extraction": self._extract,
+            "catalogue_extraction": self._extract_catalogue,
             "analysis": self._analyze,
             "report": self._report,
             "export": self._export,
@@ -106,6 +122,55 @@ class Worker:
         if handler is None:
             raise ValueError(f"Unsupported job type: {job['job_type']}")
         return await handler(job)
+
+    async def _extract_catalogue(self, job: dict[str, Any]) -> dict[str, Any]:
+        extraction_id = job["payload"]["catalogue_extraction_id"]
+        rows = await self.client.select(
+            "catalogue_extractions",
+            query=f"select=*&id=eq.{extraction_id}&limit=1",
+        )
+        if not rows:
+            raise ValueError("Catalogue extraction does not exist")
+        extraction = rows[0]
+        artifacts = await self.client.select(
+            "artifacts",
+            query=f"select=*&id=eq.{extraction['artifact_id']}&limit=1",
+        )
+        if not artifacts:
+            raise ValueError("Catalogue label artifact does not exist")
+        artifact = artifacts[0]
+        await self.client.update(
+            "catalogue_extractions",
+            f"id=eq.{extraction_id}",
+            {
+                "status": "running",
+                "started_at": datetime.now(UTC).isoformat(),
+                "provider": self.provider.name,
+                "model": self.provider.model,
+            },
+        )
+        content = await self.client.download(artifact["bucket"], artifact["object_path"])
+        proposal = await asyncio.to_thread(
+            self.provider.extract_product_label,
+            artifact["media_type"],
+            content,
+        )
+        serialized = proposal.model_dump(mode="json")
+        await self.client.update(
+            "catalogue_extractions",
+            f"id=eq.{extraction_id}",
+            {
+                "status": "succeeded",
+                "proposal": serialized,
+                "raw_response": serialized,
+                "completed_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        return {
+            "catalogue_extraction_id": extraction_id,
+            "ingredient_count": len(proposal.ingredients),
+            "warning_count": len(proposal.warnings),
+        }
 
     async def _extract(self, job: dict[str, Any]) -> dict[str, Any]:
         event_id = job["payload"]["event_id"]
@@ -293,10 +358,13 @@ class Worker:
             "record_revisions",
             "extraction_runs",
             "field_assertions",
+            "catalogue_extractions",
             "event_concepts",
             "concepts",
             "concept_aliases",
             "concept_relations",
+            "concept_versions",
+            "concept_artifacts",
             "compositions",
             "jobs",
             "analysis_runs",

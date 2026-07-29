@@ -11,6 +11,7 @@ from pajara.auth import CurrentUser
 from pajara.config import Settings, get_settings
 from pajara.domain import (
     AnalysisJobRequest,
+    CatalogueExtractionJobRequest,
     DeletionJobRequest,
     ExportJobRequest,
     ExtractionJobRequest,
@@ -133,6 +134,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         process_queued_job(background_tasks)
         return JobAccepted(job_id=job["id"], related_id=analysis["id"])
+
+    @app.post(
+        "/v1/jobs/catalogue-extraction",
+        response_model=JobAccepted,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def request_catalogue_extraction(
+        request: CatalogueExtractionJobRequest,
+        background_tasks: BackgroundTasks,
+        user: CurrentUser,
+        idempotency_key: Annotated[str | None, Header()] = None,
+    ) -> JobAccepted:
+        client = _user_client(active_settings, user.token)
+        concept = await ensure_owned(client, "concepts", request.concept_id)
+        if concept.get("user_id") != str(user.user_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Record not found",
+            )
+        await ensure_owned(client, "artifacts", request.artifact_id)
+        extraction = await client.insert(
+            "catalogue_extractions",
+            {
+                "user_id": str(user.user_id),
+                "concept_id": str(request.concept_id),
+                "artifact_id": str(request.artifact_id),
+                "provider": active_settings.extraction_provider,
+                "model": (
+                    active_settings.openai_extraction_model
+                    if active_settings.extraction_provider == "openai"
+                    else "deterministic-v1"
+                ),
+                "prompt_version": "product-label-v1",
+                "status": "queued",
+            },
+        )
+        job = await enqueue_job(
+            client,
+            user,
+            "catalogue_extraction",
+            {"catalogue_extraction_id": extraction["id"]},
+            idempotency_key,
+        )
+        process_queued_job(background_tasks)
+        return JobAccepted(job_id=job["id"], related_id=extraction["id"])
 
     @app.post(
         "/v1/jobs/report",

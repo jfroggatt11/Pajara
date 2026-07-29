@@ -2,6 +2,7 @@ import {useEffect, useState} from "react";
 import type {Session} from "@supabase/supabase-js";
 import {AuthScreen} from "./components/AuthScreen";
 import {CheckInForm} from "./components/CheckInForm";
+import {Catalogue} from "./components/Catalogue";
 import {ProfileSetup} from "./components/ProfileSetup";
 import {PhotoCompare} from "./components/PhotoCompare";
 import {QuickLogForm} from "./components/QuickLogForm";
@@ -17,6 +18,7 @@ const nav: Array<[View, string]> = [
   ["home", "Today"],
   ["checkin", "Skin check"],
   ["log", "Quick log"],
+  ["catalogue", "Saved items"],
   ["review", "Review"],
   ["timeline", "Timeline"],
   ["photos", "Photos"],
@@ -96,6 +98,7 @@ export default function App() {
         )}
         {view === "checkin" && <CheckInForm session={session} profile={profile} bodyAreas={bodyAreas} onSaved={refresh} />}
         {view === "log" && <QuickLogForm session={session} profile={profile} bodyAreas={bodyAreas} onSaved={refresh} />}
+        {view === "catalogue" && <Catalogue session={session} refreshKey={refreshKey} onChanged={refresh} />}
         {view === "review" && <ReviewQueue refreshKey={refreshKey} />}
         {view === "timeline" && <Timeline session={session} refreshKey={refreshKey} onDeleted={refresh} />}
         {view === "photos" && <PhotoCompare refreshKey={refreshKey} />}

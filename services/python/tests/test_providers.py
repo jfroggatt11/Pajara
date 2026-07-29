@@ -23,3 +23,10 @@ def test_fake_provider_does_not_diagnose() -> None:
 
     assert "diagnos" not in serialized
     assert "caused by" not in serialized
+
+
+def test_fake_label_provider_preserves_review_boundary() -> None:
+    proposal = FakeExtractionProvider().extract_product_label("image/jpeg", b"not-an-image")
+
+    assert proposal.ingredients == []
+    assert proposal.warnings

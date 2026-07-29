@@ -54,6 +54,8 @@ The first deployable prototype must let one invited user:
 10. request a cautious descriptive summary/report;
 11. export original and structured data;
 12. delete individual records and, after explicit confirmation, all profile data.
+13. save reusable products, medications, and topical treatments, review photographed
+    ingredient labels, and attach the exact saved formulation to later exposure events.
 
 Manual logging remains fully usable when the AI service is disabled or unavailable.
 
@@ -279,12 +281,25 @@ All buckets are private. Object paths start with the authenticated user's UUID.
 
 #### `concepts`, `concept_aliases`, `concept_relations`
 
-Represent canonical ingredients, products, categories, materials, activities, and
-aliases. Hierarchical relations support categories and components.
+Represent canonical ingredients, products, medications, treatments, recipes,
+categories, materials, activities, and aliases. Hierarchical relations support
+categories and components. User catalogue items have optional brand, category, form,
+strength, favourite, last-used, and archive metadata.
+
+#### `concept_versions`, `concept_artifacts`, `catalogue_extractions`
+
+- immutable numbered snapshots prevent a later formulation edit from rewriting
+  historical exposures;
+- private front/packaging and ingredient-label images remain linked to the catalogue
+  item and formulation;
+- label-reading jobs retain provider, model, prompt version, status, original artifact,
+  proposed identity/ordered ingredients, warnings, and review decision;
+- accepted or corrected proposals create a new formulation version; rejected proposals
+  leave the existing item unchanged.
 
 #### `compositions`
 
-Versioned product/recipe composition:
+Versioned product/recipe composition linked to a `concept_version`:
 
 - owner and component concepts;
 - amount/unit/concentration/order where known;
@@ -311,6 +326,11 @@ by the user:
 - preparation records affected body areas, state, duration, gloves, splashes, and
   cleanup;
 - a linked cleanup/handwashing contact may record soap, detergent, or gloves.
+
+The current Saved items screen implements reusable products, medications, and topical
+treatments. It accepts manual ingredients plus private front/ingredient-label images,
+supports favourites and archiving, and queues optional label extraction. Quick Log
+references both the catalogue concept and its active immutable version.
 
 ### 6.5 AI proposals and revisions
 
@@ -400,13 +420,20 @@ enhancements. No automated diagnosis or clinical image score is included.
 
 ### 8.2 Quick log
 
-The user selects meal, product/contact, treatment, activity, or note and can:
+The user selects meal, product/contact, medication, treatment, activity, or note and can:
 
 - type free text;
 - record audio;
 - optionally fill structured shortcuts;
 - set or correct occurrence time;
 - save without waiting for AI.
+
+Saved medications/treatments record amount, unit, route, and topical body area.
+Activities include shower, bath, washing up, exercise, sweating, and swimming.
+Water activities record duration and water temperature. Washing up additionally
+records detergent/products, body area, gloves/material, and direct-contact certainty.
+An activity can reference several saved products, such as shampoo, soap, and
+moisturiser used around one shower.
 
 Prepared meals ask separately:
 
@@ -447,6 +474,11 @@ AI is optional and provider-isolated. The initial OpenAI adapter:
 - returns field-level evidence and confidence;
 - never trusts a failed extraction; the user-authored original remains available as
   manual data.
+
+For product-label images, the adapter sends the selected private image only after the
+user requests AI extraction. It extracts visible product identity and the ordered
+ingredient text without inferring hidden composition. The deterministic fake provider
+does not read images and returns an explicit manual-review warning.
 
 No photos, audio, or text are sent to a remote provider unless remote AI is enabled.
 API keys are held only by the Python service. Representative extraction fixtures are
@@ -521,6 +553,7 @@ Initial authenticated endpoints:
 GET  /health
 GET  /ready
 POST /v1/jobs/extraction
+POST /v1/jobs/catalogue-extraction
 POST /v1/jobs/analysis
 POST /v1/jobs/report
 POST /v1/jobs/export
@@ -683,6 +716,20 @@ environments and are the next operational work.
 
 - extraction jobs, worker/provider, proposals, confidence/evidence, corrections.
 
+**M1.5 Reusable exposure catalogue**
+
+- saved medications, topical treatments, and personal/household products;
+- private front and ingredient-label images;
+- versioned reviewed formulations and normalized ingredient concepts;
+- favourites, recency, archiving, and saved-item selection in Quick Log;
+- shower, bath, and washing-up shortcuts with multi-product contact links.
+
+**Next: M1.6 Reusable meals**
+
+- saved recipe/meal templates and immutable versions;
+- “log again” versus “create variation” using `derived_from`;
+- actual meal consumption linked separately from preparation/contact and cleanup.
+
 ### M2 — useful feedback and ownership
 
 **M2.1 Trends/photo comparison**
@@ -755,6 +802,8 @@ The prototype is ready for daily use when:
 - a prepared meal records ingestion and direct skin contact independently;
 - text/audio quick logs survive AI and network failures;
 - AI output is never trusted before review;
+- saved products and treatments can be selected repeatedly without re-entering their
+  composition, and historical logs retain the formulation version used;
 - pending data is visibly distinct and excluded from analysis;
 - timeline and trends render only the signed-in user's data;
 - descriptive reports state uncertainty and alternatives without diagnosis;
@@ -762,6 +811,6 @@ The prototype is ready for daily use when:
 - deletion and both database/Storage backup procedures are demonstrated;
 - all automated checks pass from a clean checkout.
 
-Advanced causal models, receipt/URL ingestion, automatic weather, image-derived
-severity, public signup, multi-user product features, and cloud-to-cloud sync are
-post-prototype work.
+Reusable recipe variations, advanced causal models, receipt/URL ingestion, automatic
+weather, image-derived severity, public signup, multi-user product features, and
+cloud-to-cloud sync are post-prototype work.

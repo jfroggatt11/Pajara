@@ -4,6 +4,17 @@ import {apiPost} from "../lib/api";
 import {supabase} from "../lib/supabase";
 import type {EventRecord, Observation} from "../types";
 
+interface EventConceptLink {
+  id: string;
+  event_id: string;
+  role: string;
+  amount: number | null;
+  unit: string | null;
+  body_area_code: string | null;
+  route: string | null;
+  concepts: {canonical_name: string; concept_type: string} | null;
+}
+
 export function Timeline({
   session,
   refreshKey,
@@ -15,14 +26,21 @@ export function Timeline({
 }) {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
+  const [conceptLinks, setConceptLinks] = useState<EventConceptLink[]>([]);
 
   useEffect(() => {
     void Promise.all([
       supabase.from("events").select("*").order("occurred_start", {ascending: false}).limit(100),
       supabase.from("observations").select("*").order("observed_at", {ascending: false}).limit(500),
-    ]).then(([eventResult, observationResult]) => {
+      supabase
+        .from("event_concepts")
+        .select("id,event_id,role,amount,unit,body_area_code,route,concepts(canonical_name,concept_type)")
+        .order("created_at", {ascending: false})
+        .limit(500),
+    ]).then(([eventResult, observationResult, conceptsResult]) => {
       setEvents((eventResult.data || []) as EventRecord[]);
       setObservations((observationResult.data || []) as Observation[]);
+      setConceptLinks((conceptsResult.data || []) as unknown as EventConceptLink[]);
     });
   }, [refreshKey]);
 
@@ -45,6 +63,7 @@ export function Timeline({
       <div className="timeline">
         {events.map((event) => {
           const scores = observations.filter((item) => item.event_id === event.id);
+          const linkedItems = conceptLinks.filter((item) => item.event_id === event.id);
           return (
             <article className="timeline-item" key={event.id}>
               <time>{new Date(event.occurred_start).toLocaleString()}</time>
@@ -57,6 +76,22 @@ export function Timeline({
                 {scores.length > 0 && (
                   <div className="score-chips">
                     {scores.map((score) => <span key={score.id}>{score.type_code} {score.numeric_value}/10</span>)}
+                  </div>
+                )}
+                {linkedItems.length > 0 && (
+                  <div className="linked-items">
+                    {linkedItems.map((item) => (
+                      <span key={item.id}>
+                        {item.concepts?.canonical_name || "Saved item"} · {item.role}
+                        {item.amount !== null
+                          ? ` · ${item.amount}${item.unit ? ` ${item.unit}` : ""}`
+                          : ""}
+                        {item.body_area_code
+                          ? ` · ${item.body_area_code.replaceAll("_", " ")}`
+                          : ""}
+                        {item.route ? ` · ${item.route}` : ""}
+                      </span>
+                    ))}
                   </div>
                 )}
                 <button className="text-button small" onClick={() => void deleteEvent(event.id)}>Delete entry</button>

@@ -3,21 +3,34 @@ import type {Session} from "@supabase/supabase-js";
 import {useVoiceRecorder} from "../hooks/useVoiceRecorder";
 import {apiPost} from "../lib/api";
 import {uploadArtifact} from "../lib/artifacts";
+import {sortCatalogueItems} from "../lib/catalogue";
 import {transcribeWithMoonshine} from "../lib/moonshine";
 import {
   buildVoiceTranscriptionProvenance,
   moonshineConfig,
 } from "../lib/voiceTranscription";
 import {supabase} from "../lib/supabase";
-import type {BodyArea, Profile} from "../types";
+import type {BodyArea, CatalogueItem, ConceptVersion, Profile} from "../types";
 import {StatusMessage} from "./StatusMessage";
 
 const types = [
   ["meal", "Meal"],
-  ["skin_contact", "Skin contact / product"],
-  ["topical_treatment", "Treatment"],
+  ["skin_contact", "Skin contact"],
+  ["product_use", "Product use"],
+  ["topical_treatment", "Cream / topical treatment"],
+  ["medication", "Medication"],
   ["activity", "Activity"],
   ["note", "Note"],
+] as const;
+
+const activityTypes = [
+  ["shower", "Shower"],
+  ["bath", "Bath"],
+  ["washing_up", "Washing up"],
+  ["exercise", "Exercise"],
+  ["sweating", "Sweating"],
+  ["swimming", "Swimming"],
+  ["other", "Other activity"],
 ] as const;
 
 export function QuickLogForm({
@@ -37,6 +50,19 @@ export function QuickLogForm({
   const [handled, setHandled] = useState("");
   const [bodyArea, setBodyArea] = useState("both_hands");
   const [gloves, setGloves] = useState(false);
+  const [gloveMaterial, setGloveMaterial] = useState("");
+  const [selectedConceptId, setSelectedConceptId] = useState("");
+  const [activityConceptIds, setActivityConceptIds] = useState<string[]>([]);
+  const [activityProductAreas, setActivityProductAreas] = useState<Record<string, string>>({});
+  const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
+  const [conceptVersions, setConceptVersions] = useState<ConceptVersion[]>([]);
+  const [amount, setAmount] = useState("");
+  const [unit, setUnit] = useState("");
+  const [route, setRoute] = useState("");
+  const [activityType, setActivityType] = useState("shower");
+  const [durationMinutes, setDurationMinutes] = useState("");
+  const [waterTemperature, setWaterTemperature] = useState("unknown");
+  const [directContact, setDirectContact] = useState<"yes" | "no" | "unknown">("unknown");
   const [requestAi, setRequestAi] = useState(profile.ai_enabled);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +77,25 @@ export function QuickLogForm({
   const [useBackendFallback, setUseBackendFallback] = useState(false);
   const [textBeforeVoice, setTextBeforeVoice] = useState("");
   const voice = useVoiceRecorder();
+
+  useEffect(() => {
+    void Promise.all([
+      supabase
+        .from("concepts")
+        .select("*")
+        .in("concept_type", ["product", "medication", "treatment"])
+        .is("archived_at", null)
+        .order("canonical_name"),
+      supabase
+        .from("concept_versions")
+        .select("*")
+        .is("effective_to", null)
+        .order("version_number", {ascending: false}),
+    ]).then(([itemsResult, versionsResult]) => {
+      setCatalogueItems((itemsResult.data || []) as CatalogueItem[]);
+      setConceptVersions((versionsResult.data || []) as ConceptVersion[]);
+    });
+  }, []);
 
   useEffect(() => {
     if (!voice.audioFile) return;
@@ -120,6 +165,12 @@ export function QuickLogForm({
     setSuccess(null);
     try {
       const now = new Date().toISOString();
+      const selectedItems =
+        type === "activity"
+          ? catalogueItems.filter((item) => activityConceptIds.includes(item.id))
+          : catalogueItems.filter((item) => item.id === selectedConceptId);
+      const selectedItem = selectedItems[0];
+      const shouldExtract = requestAi && Boolean(text.trim() || voice.audioFile);
       const voiceTranscription = voice.audioFile
         ? buildVoiceTranscriptionProvenance({
             machineTranscript,
@@ -137,18 +188,91 @@ export function QuickLogForm({
           type_code: type,
           occurred_start: now,
           recorded_timezone: profile.timezone,
-          label: null,
+          label:
+            (type === "activity"
+              ? activityTypes.find(([value]) => value === activityType)?.[1]
+              : selectedItem?.canonical_name || null),
           attributes: {
             original_text: text,
             prepared_by_user: type === "meal" ? prepared : undefined,
+            activity_code: type === "activity" ? activityType : undefined,
+            duration_minutes:
+              type === "activity" && durationMinutes ? Number(durationMinutes) : undefined,
+            water_temperature:
+              type === "activity"
+              && ["shower", "bath", "washing_up"].includes(activityType)
+                ? waterTemperature
+                : undefined,
+            gloves_used:
+              type === "activity" && activityType === "washing_up" ? gloves : undefined,
+            glove_material:
+              type === "activity" && activityType === "washing_up"
+                ? gloveMaterial
+                : undefined,
+            direct_contact:
+              type === "activity" && activityType === "washing_up"
+                ? directContact
+                : undefined,
             voice_transcription: voiceTranscription,
           },
-          trust_status: requestAi && !(type === "meal" && prepared) ? "draft" : "trusted",
-          source_method: voice.audioFile ? "voice" : "text",
+          trust_status: shouldExtract && !(type === "meal" && prepared) ? "draft" : "trusted",
+          source_method: voice.audioFile ? "voice" : text.trim() ? "text" : "manual",
         })
         .select()
         .single();
       if (eventError) throw eventError;
+
+      for (const linkedItem of selectedItems) {
+        const selectedVersion = conceptVersions.find(
+          (version) => version.concept_id === linkedItem.id,
+        );
+        const role = {
+          skin_contact: "contacted",
+          product_use: "used",
+          topical_treatment: "applied",
+          medication: "taken",
+          activity: activityType === "washing_up" ? "contacted" : "used",
+        }[type] || "present";
+        const {error: conceptError} = await supabase.from("event_concepts").insert({
+          user_id: session.user.id,
+          event_id: mainEvent.id,
+          concept_id: linkedItem.id,
+          concept_version_id: selectedVersion?.id || null,
+          role,
+          amount: amount ? Number(amount) : null,
+          unit: unit.trim() || null,
+          body_area_code:
+            type === "activity"
+              ? activityProductAreas[linkedItem.id] || null
+              : ["skin_contact", "topical_treatment"].includes(type)
+                ? bodyArea
+                : null,
+          duration_seconds: durationMinutes ? Math.round(Number(durationMinutes) * 60) : null,
+          route: route.trim() || null,
+          gloves_used:
+            type === "activity" && activityType === "washing_up" ? gloves : null,
+          glove_material:
+            type === "activity" && activityType === "washing_up"
+              ? gloveMaterial.trim() || null
+              : null,
+          direct_contact:
+            type === "activity" && activityType === "washing_up" ? directContact : null,
+          confidence: 1,
+          review_state: "accepted",
+          provenance: {
+            method: "manual_catalogue_selection",
+            concept_version: selectedVersion?.version_number || null,
+          },
+        });
+        if (conceptError) throw conceptError;
+        const {error: recentError} = await supabase
+          .from("concepts")
+          .update({
+            attributes: {...linkedItem.attributes, last_used_at: now},
+          })
+          .eq("id", linkedItem.id);
+        if (recentError) throw recentError;
+      }
 
       let extractionTarget = mainEvent.id as string;
       if (type === "meal" && prepared) {
@@ -169,8 +293,8 @@ export function QuickLogForm({
               gloves_used: gloves,
               voice_transcription: voiceTranscription,
             },
-            trust_status: requestAi ? "draft" : "trusted",
-            source_method: voice.audioFile ? "voice" : "text",
+            trust_status: shouldExtract ? "draft" : "trusted",
+            source_method: voice.audioFile ? "voice" : text.trim() ? "text" : "manual",
           })
           .select()
           .single();
@@ -197,7 +321,7 @@ export function QuickLogForm({
         );
       }
 
-      if (requestAi) {
+      if (shouldExtract) {
         try {
           await apiPost("/v1/jobs/extraction", session, {
             event_id: extractionTarget,
@@ -235,9 +359,16 @@ export function QuickLogForm({
           return;
         }
       }
-      setSuccess(requestAi ? "Saved. AI extraction is queued for review." : "Log saved.");
+      setSuccess(shouldExtract ? "Saved. AI extraction is queued for review." : "Log saved.");
       setText("");
       setHandled("");
+      setSelectedConceptId("");
+      setActivityConceptIds([]);
+      setActivityProductAreas({});
+      setAmount("");
+      setUnit("");
+      setRoute("");
+      setDurationMinutes("");
       voice.clear();
       setVoiceStatus("idle");
       setMachineTranscript(null);
@@ -263,12 +394,279 @@ export function QuickLogForm({
       <form className="stack card" onSubmit={submit}>
         <label>
           What are you logging?
-          <select value={type} onChange={(event) => setType(event.target.value)}>
+          <select
+            value={type}
+            onChange={(event) => {
+              setType(event.target.value);
+              setSelectedConceptId("");
+              setActivityConceptIds([]);
+              setActivityProductAreas({});
+            }}
+          >
             {types.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
           </select>
         </label>
+        {type === "activity" && (
+          <fieldset className="subcard">
+            <legend>Activity details</legend>
+            <div className="form-grid">
+              <label>
+                Activity
+                <select
+                  value={activityType}
+                  onChange={(event) => {
+                    setActivityType(event.target.value);
+                    setSelectedConceptId("");
+                    setActivityConceptIds([]);
+                    setActivityProductAreas({});
+                    if (event.target.value === "washing_up") setBodyArea("both_hands");
+                  }}
+                >
+                  {activityTypes.map(([value, label]) => (
+                    <option value={value} key={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Duration in minutes
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={durationMinutes}
+                  onChange={(event) => setDurationMinutes(event.target.value)}
+                />
+              </label>
+              {["shower", "bath", "washing_up"].includes(activityType) && (
+                <label>
+                  Water temperature
+                  <select
+                    value={waterTemperature}
+                    onChange={(event) => setWaterTemperature(event.target.value)}
+                  >
+                    <option value="unknown">Not recorded</option>
+                    <option value="cool">Cool</option>
+                    <option value="lukewarm">Lukewarm</option>
+                    <option value="warm">Warm</option>
+                    <option value="hot">Hot</option>
+                  </select>
+                </label>
+              )}
+              {activityType === "washing_up" && (
+                <label>
+                  Default hand/body area
+                  <select
+                    value={bodyArea}
+                    onChange={(event) => {
+                      setBodyArea(event.target.value);
+                      setActivityProductAreas(
+                        Object.fromEntries(
+                          activityConceptIds.map((conceptId) => [
+                            conceptId,
+                            event.target.value,
+                          ]),
+                        ),
+                      );
+                    }}
+                  >
+                    {bodyAreas.map((area) => (
+                      <option value={area.code} key={area.code}>{area.label}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            {activityType === "washing_up" && (
+              <>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={gloves}
+                    onChange={(event) => setGloves(event.target.checked)}
+                  />
+                  <span>Wore gloves</span>
+                </label>
+                {gloves && (
+                  <label>
+                    Glove material
+                    <input
+                      value={gloveMaterial}
+                      onChange={(event) => setGloveMaterial(event.target.value)}
+                      placeholder="e.g. nitrile, latex, rubber"
+                    />
+                  </label>
+                )}
+                <label>
+                  Direct detergent/water contact
+                  <select
+                    value={directContact}
+                    onChange={(event) =>
+                      setDirectContact(event.target.value as "yes" | "no" | "unknown")}
+                  >
+                    <option value="unknown">Unknown / not recorded</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </label>
+              </>
+            )}
+          </fieldset>
+        )}
+        {["skin_contact", "product_use", "topical_treatment", "medication", "activity"]
+          .includes(type) && (
+          <fieldset className="subcard">
+            <legend>
+              {type === "medication"
+                ? "Saved medication"
+                : type === "topical_treatment"
+                  ? "Saved treatment"
+                  : activityType === "washing_up" && type === "activity"
+                    ? "Detergent / product used"
+                    : "Saved product"}
+            </legend>
+            <label>
+              {type === "activity" ? "Select every product used" : "Select an item"}
+              {type === "activity" ? (
+                <span className="choice-list">
+                {sortCatalogueItems(catalogueItems
+                    .filter((item) => item.concept_type !== "medication")
+                  ).map((item) => (
+                      <span className="check-row" key={item.id}>
+                        <input
+                          type="checkbox"
+                          checked={activityConceptIds.includes(item.id)}
+                          onChange={(event) =>
+                            setActivityConceptIds((current) => {
+                              if (event.target.checked) {
+                                setActivityProductAreas((areas) => ({
+                                  ...areas,
+                                  [item.id]: activityType === "washing_up" ? bodyArea : "",
+                                }));
+                                return [...current, item.id];
+                              }
+                              setActivityProductAreas((areas) => {
+                                const next = {...areas};
+                                delete next[item.id];
+                                return next;
+                              });
+                              return current.filter((id) => id !== item.id);
+                            })}
+                        />
+                        <span>
+                          {item.attributes.favorite ? "★ " : ""}
+                          {item.canonical_name}
+                          {item.attributes.brand ? ` · ${item.attributes.brand}` : ""}
+                        </span>
+                      </span>
+                    ))}
+                  {catalogueItems.filter((item) => item.concept_type !== "medication")
+                    .length === 0 && (
+                    <span className="evidence">No saved products yet.</span>
+                  )}
+                </span>
+              ) : (
+                <select
+                  value={selectedConceptId}
+                  onChange={(event) => setSelectedConceptId(event.target.value)}
+                >
+                  <option value="">None / describe it below</option>
+                  {sortCatalogueItems(catalogueItems
+                    .filter((item) => {
+                      if (type === "medication") return item.concept_type === "medication";
+                      if (type === "topical_treatment") {
+                        return item.concept_type === "treatment"
+                          || item.attributes.category === "moisturiser";
+                      }
+                      return item.concept_type !== "medication";
+                    }))
+                    .map((item) => (
+                      <option value={item.id} key={item.id}>
+                        {item.attributes.favorite ? "★ " : ""}
+                        {item.canonical_name}
+                        {item.attributes.brand ? ` · ${item.attributes.brand}` : ""}
+                      </option>
+                    ))}
+                </select>
+              )}
+            </label>
+            {type === "activity" && activityConceptIds.length > 0 && (
+              <div className="activity-product-areas">
+                {activityConceptIds.map((conceptId) => (
+                  <label key={conceptId}>
+                    {catalogueItems.find((item) => item.id === conceptId)?.canonical_name}
+                    {" "}contact area
+                    <select
+                      value={activityProductAreas[conceptId] || ""}
+                      onChange={(event) =>
+                        setActivityProductAreas({
+                          ...activityProductAreas,
+                          [conceptId]: event.target.value,
+                        })}
+                    >
+                      <option value="">Not recorded</option>
+                      {bodyAreas.map((area) => (
+                        <option value={area.code} key={area.code}>{area.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
+            {selectedConceptId && ["medication", "topical_treatment", "product_use"]
+              .includes(type) && (
+              <div className="form-grid">
+                <label>
+                  Amount / dose
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Unit
+                  <input
+                    value={unit}
+                    onChange={(event) => setUnit(event.target.value)}
+                    placeholder="e.g. tablet, mg, pump, fingertip unit"
+                  />
+                </label>
+                <label>
+                  Route
+                  <input
+                    value={route}
+                    onChange={(event) => setRoute(event.target.value)}
+                    placeholder={type === "topical_treatment" ? "topical" : "e.g. oral"}
+                  />
+                </label>
+                {type === "topical_treatment" && (
+                  <label>
+                    Applied to
+                    <select
+                      value={bodyArea}
+                      onChange={(event) => setBodyArea(event.target.value)}
+                    >
+                      {bodyAreas.map((area) => (
+                        <option value={area.code} key={area.code}>{area.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            )}
+            {catalogueItems.length === 0 && (
+              <p className="evidence">
+                Add reusable products, treatments or medications under Saved items first.
+              </p>
+            )}
+          </fieldset>
+        )}
         <label>
-          Describe it
+          {selectedConceptId || activityConceptIds.length > 0 || type === "activity"
+            ? "Additional notes (optional)"
+            : "Describe it"}
           <textarea
             rows={5}
             value={text}
@@ -279,7 +677,11 @@ export function QuickLogForm({
                 setTranscriptConfirmedAt(null);
               }
             }}
-            placeholder="For example: Made tomato pasta, chopped tomatoes with bare hands, then washed with the kitchen soap."
+            placeholder={
+              type === "meal"
+                ? "For example: Made tomato pasta, chopped tomatoes with bare hands, then washed with the kitchen soap."
+                : "Anything else that may matter, such as timing, contact or circumstances."
+            }
           />
         </label>
         <div className="voice-row">
@@ -417,7 +819,13 @@ export function QuickLogForm({
           className="primary"
           disabled={
             busy
-            || (!text.trim() && !voice.audioFile)
+            || (
+              !text.trim()
+              && !voice.audioFile
+              && !selectedConceptId
+              && activityConceptIds.length === 0
+              && type !== "activity"
+            )
             || voiceStatus === "loading"
             || voiceStatus === "transcribing"
             || Boolean(

@@ -37,6 +37,10 @@ arguments, or the frontend.
    npx supabase db push --include-seed
    ```
 
+   For an existing Pajara project, confirm that
+   `202607290002_catalogue.sql` is listed before approving the push. It creates the
+   catalogue/version/review tables and functions; it does not replace existing logs.
+
 5. In Authentication:
    - set the initial Site URL to the eventual Netlify production URL;
    - add `http://localhost:5173` only for local development;
@@ -72,6 +76,11 @@ The secret key bypasses RLS. It belongs only in the Python API/worker secret sto
 
 5. Queue a job and confirm the API claims it after returning the response, without
    logging job payloads or health inputs.
+
+To read photographed ingredient labels, change `EXTRACTION_PROVIDER` to `openai`, add
+the server-only `OPENAI_API_KEY`, and redeploy Render. With `fake`, catalogue items,
+manual ingredients, images, and logging still work, but image extraction returns an
+explicit warning rather than pretending to read the label.
 
 The Free service spins down after inactivity and can take about one minute to wake.
 This is acceptable for a single-user prototype, not production. Jobs remain durable
@@ -143,15 +152,22 @@ On the intended phone:
    - record food consumed;
    - record ingredients actually handled;
    - choose body area and glove state.
-6. Record an English voice note of no more than 30 seconds:
+6. Add a saved cream or household product:
+   - enter any known ingredients;
+   - attach a front and ingredient-label photo;
+   - if remote AI is enabled, review/correct the proposed ordered ingredient list;
+   - log the saved item and verify the event references its formulation version.
+7. Log a shower and washing-up activity, including all products used, water
+   temperature, duration, gloves, and direct contact where applicable.
+8. Record an English voice note of no more than 30 seconds:
    - allow the first-use Moonshine download to complete;
    - correct and confirm the local transcript;
    - verify the event retains transcription provenance and the private original audio.
-7. Queue fake extraction, let the worker process it, then accept/correct/reject fields.
-8. Confirm pending data is absent from trusted trends until review.
-9. Run a descriptive analysis and generate a report.
-10. Queue an export and validate its manifest checksums.
-11. Turn off the AI/backend and confirm manual capture still saves.
+9. Queue fake extraction, let the worker process it, then accept/correct/reject fields.
+10. Confirm pending data is absent from trusted trends until review.
+11. Run a descriptive analysis and generate a report.
+12. Queue an export and validate its manifest checksums.
+13. Turn off the AI/backend and confirm manual capture still saves.
 
 Only after that test should `EXTRACTION_PROVIDER=openai` be enabled for one consented
 sample.
@@ -174,8 +190,8 @@ ready for daily use.
   backups must still mirror Storage independently.
 - Photo comparison supports side-by-side review and an opacity overlay. Automatic
   alignment and synchronized zoom remain later enhancements.
-- AI extraction currently proposes event fields. Normalized ingredient composition
-  review is the next data feature.
+- Saved meals and recipe variations are not implemented yet. Meals still support
+  free-text capture and distinct preparation/contact logging.
 - Analysis is deliberately descriptive until enough repeated observations exist.
 - Moonshine browser transcription is currently English-only in this prototype and
   uses a beta package pinned to an exact version.

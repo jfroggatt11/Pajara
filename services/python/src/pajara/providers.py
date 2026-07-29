@@ -1,13 +1,19 @@
-"""Provider-isolated AI extraction and transcription."""
+"""Provider-isolated AI extraction, label reading, and transcription."""
 
+import base64
 import re
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, cast
 
 from openai import OpenAI
+from openai.types.responses import ResponseInputParam
 
 from pajara.config import Settings
-from pajara.domain import ExtractionProposal, ProposedAssertion
+from pajara.domain import (
+    ExtractionProposal,
+    ProductLabelProposal,
+    ProposedAssertion,
+)
 
 EXTRACTION_INSTRUCTIONS = """
 You organize personal dermatitis tracking inputs into proposed structured fields.
@@ -18,6 +24,14 @@ For meals, distinguish food consumed from ingredients actually handled. Never as
 that every recipe ingredient touched skin. Use field paths /label or
 /attributes/<snake_case_key>. Confidence is extraction confidence, not trigger
 probability.
+""".strip()
+
+PRODUCT_LABEL_INSTRUCTIONS = """
+Read a photographed personal-care, household, treatment, or medication product label.
+Extract only text that is visibly supported by the image. Preserve ingredient order.
+Do not expand abbreviations by guessing, infer hidden ingredients, diagnose a condition,
+or recommend starting, stopping, or changing treatment. Use confidence to describe
+transcription certainty only. Put unreadable or ambiguous areas in warnings.
 """.strip()
 
 
@@ -31,6 +45,9 @@ class ExtractionProvider(ABC):
 
     def transcribe(self, filename: str, media_type: str, content: bytes) -> str:
         raise RuntimeError("Transcription is not supported by this provider")
+
+    def extract_product_label(self, media_type: str, content: bytes) -> ProductLabelProposal:
+        raise RuntimeError("Image label extraction is not supported by this provider")
 
 
 class FakeExtractionProvider(ExtractionProvider):
@@ -76,6 +93,15 @@ class FakeExtractionProvider(ExtractionProvider):
             warnings=["Review every proposed field before trusting it."],
         )
 
+    def extract_product_label(self, media_type: str, content: bytes) -> ProductLabelProposal:
+        del media_type, content
+        return ProductLabelProposal(
+            warnings=[
+                "The deterministic development provider cannot read images. "
+                "Enter the label manually or configure the vision provider."
+            ]
+        )
+
 
 class OpenAIExtractionProvider(ExtractionProvider):
     name = "openai"
@@ -104,6 +130,39 @@ class OpenAIExtractionProvider(ExtractionProvider):
             file=(filename, content, media_type),
         )
         return str(transcript.text)
+
+    def extract_product_label(self, media_type: str, content: bytes) -> ProductLabelProposal:
+        encoded = base64.b64encode(content).decode("ascii")
+        request_input = cast(
+            "ResponseInputParam",
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "Extract the product identity and ordered ingredient list "
+                                "from this label image."
+                            ),
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:{media_type};base64,{encoded}",
+                        },
+                    ],
+                }
+            ],
+        )
+        response = self.client.responses.parse(
+            model=self.model,
+            instructions=PRODUCT_LABEL_INSTRUCTIONS,
+            input=request_input,
+            text_format=ProductLabelProposal,
+        )
+        if response.output_parsed is None:
+            raise RuntimeError("The label extraction model returned no validated proposal")
+        return response.output_parsed
 
 
 def build_provider(settings: Settings) -> ExtractionProvider:
