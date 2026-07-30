@@ -4,6 +4,7 @@ import {useVoiceRecorder} from "../hooks/useVoiceRecorder";
 import {apiPost} from "../lib/api";
 import {uploadArtifact} from "../lib/artifacts";
 import {sortCatalogueItems} from "../lib/catalogue";
+import {buildMealPreparationSourceText} from "../lib/mealPreparation";
 import {transcribeWithMoonshine} from "../lib/moonshine";
 import {
   buildVoiceTranscriptionProvenance,
@@ -47,6 +48,7 @@ export function QuickLogForm({
   const [type, setType] = useState<string>("meal");
   const [text, setText] = useState("");
   const [prepared, setPrepared] = useState(false);
+  const [preparationMethod, setPreparationMethod] = useState("");
   const [handled, setHandled] = useState("");
   const [bodyArea, setBodyArea] = useState("both_hands");
   const [gloves, setGloves] = useState(false);
@@ -170,7 +172,17 @@ export function QuickLogForm({
           ? catalogueItems.filter((item) => activityConceptIds.includes(item.id))
           : catalogueItems.filter((item) => item.id === selectedConceptId);
       const selectedItem = selectedItems[0];
-      const shouldExtract = requestAi && Boolean(text.trim() || voice.audioFile);
+      const preparationSourceText =
+        type === "meal" && prepared
+          ? buildMealPreparationSourceText({
+              method: preparationMethod,
+              contact: handled,
+              notes: text,
+            })
+          : "";
+      const shouldExtract = requestAi && Boolean(
+        text.trim() || voice.audioFile || preparationSourceText,
+      );
       const voiceTranscription = voice.audioFile
         ? buildVoiceTranscriptionProvenance({
             machineTranscript,
@@ -241,7 +253,7 @@ export function QuickLogForm({
           concept_version_id: selectedVersion?.id || null,
           role,
           amount: amount ? Number(amount) : null,
-          unit: unit.trim() || (type === "meal" && amount ? "serving" : null),
+          unit: unit.trim() || null,
           body_area_code:
             type === "activity"
               ? activityProductAreas[linkedItem.id] || null
@@ -285,13 +297,18 @@ export function QuickLogForm({
             type_code: "meal_preparation",
             occurred_start: now,
             recorded_timezone: profile.timezone,
-            label: "Meal preparation",
+            label: selectedItem
+              ? `${selectedItem.canonical_name} preparation`
+              : "Meal preparation",
             attributes: {
-              original_text: text,
+              original_text: preparationSourceText,
               prepared_by_user: true,
+              preparation_method: preparationMethod,
               handled_ingredients_text: handled,
+              skin_contact_description: handled,
               contact_body_area: bodyArea,
               gloves_used: gloves,
+              glove_material: gloves ? gloveMaterial.trim() || null : null,
               voice_transcription: voiceTranscription,
             },
             trust_status: shouldExtract ? "draft" : "trusted",
@@ -347,7 +364,12 @@ export function QuickLogForm({
               : "Your original log is safely stored as trusted manual data.",
           );
           setText("");
+          setPreparationMethod("");
           setHandled("");
+          setPrepared(false);
+          setSelectedConceptId("");
+          setGloves(false);
+          setGloveMaterial("");
           voice.clear();
           setVoiceStatus("idle");
           setMachineTranscript(null);
@@ -362,8 +384,12 @@ export function QuickLogForm({
       }
       setSuccess(shouldExtract ? "Saved. AI extraction is queued for review." : "Log saved.");
       setText("");
+      setPreparationMethod("");
       setHandled("");
+      setPrepared(false);
       setSelectedConceptId("");
+      setGloves(false);
+      setGloveMaterial("");
       setActivityConceptIds([]);
       setActivityProductAreas({});
       setAmount("");
@@ -402,6 +428,9 @@ export function QuickLogForm({
               setSelectedConceptId("");
               setActivityConceptIds([]);
               setActivityProductAreas({});
+              setPrepared(false);
+              setPreparationMethod("");
+              setHandled("");
               setAmount("");
               setUnit("");
               setRoute("");
@@ -579,7 +608,15 @@ export function QuickLogForm({
               ) : (
                 <select
                   value={selectedConceptId}
-                  onChange={(event) => setSelectedConceptId(event.target.value)}
+                  onChange={(event) => {
+                    const nextId = event.target.value;
+                    const selected = catalogueItems.find((item) => item.id === nextId);
+                    setSelectedConceptId(nextId);
+                    if (type === "meal") {
+                      setPreparationMethod(selected?.attributes.preparation_notes || "");
+                      setHandled(selected?.attributes.preparation_contact_notes || "");
+                    }
+                  }}
                 >
                   <option value="">None / describe it below</option>
                   {sortCatalogueItems(catalogueItems
@@ -626,11 +663,11 @@ export function QuickLogForm({
                 ))}
               </div>
             )}
-            {selectedConceptId && ["meal", "medication", "topical_treatment", "product_use"]
+            {selectedConceptId && ["medication", "topical_treatment", "product_use"]
               .includes(type) && (
               <div className="form-grid">
                 <label>
-                  {type === "meal" ? "Servings eaten" : "Amount / dose"}
+                  Amount / dose
                   <input
                     type="number"
                     min="0"
@@ -639,26 +676,22 @@ export function QuickLogForm({
                     onChange={(event) => setAmount(event.target.value)}
                   />
                 </label>
-                {type !== "meal" && (
-                  <>
-                    <label>
-                      Unit
-                      <input
-                        value={unit}
-                        onChange={(event) => setUnit(event.target.value)}
-                        placeholder="e.g. tablet, mg, pump, fingertip unit"
-                      />
-                    </label>
-                    <label>
-                      Route
-                      <input
-                        value={route}
-                        onChange={(event) => setRoute(event.target.value)}
-                        placeholder={type === "topical_treatment" ? "topical" : "e.g. oral"}
-                      />
-                    </label>
-                  </>
-                )}
+                <label>
+                  Unit
+                  <input
+                    value={unit}
+                    onChange={(event) => setUnit(event.target.value)}
+                    placeholder="e.g. tablet, mg, pump, fingertip unit"
+                  />
+                </label>
+                <label>
+                  Route
+                  <input
+                    value={route}
+                    onChange={(event) => setRoute(event.target.value)}
+                    placeholder={type === "topical_treatment" ? "topical" : "e.g. oral"}
+                  />
+                </label>
                 {type === "topical_treatment" && (
                   <label>
                     Applied to
@@ -675,10 +708,20 @@ export function QuickLogForm({
               </div>
             )}
             {type === "meal" && selectedConceptId && (
-              <p className="evidence">
-                This logs the current saved recipe version. Use Saved items to edit it or
-                create a variation without changing earlier meal logs.
-              </p>
+              <div className="stack compact-recipe-summary">
+                {catalogueItems.find((item) => item.id === selectedConceptId)
+                  ?.attributes.preparation_notes && (
+                  <p className="evidence">
+                    <strong>Saved method:</strong>{" "}
+                    {catalogueItems.find((item) => item.id === selectedConceptId)
+                      ?.attributes.preparation_notes}
+                  </p>
+                )}
+                <p className="evidence">
+                  This logs the current saved recipe version. Preparation contact is
+                  recorded separately below.
+                </p>
+              </div>
             )}
             {(type === "meal"
               ? catalogueItems.every((item) => item.concept_type !== "recipe")
@@ -814,19 +857,65 @@ export function QuickLogForm({
           <fieldset className="subcard">
             <legend>Preparation and skin contact</legend>
             <label className="check-row">
-              <input type="checkbox" checked={prepared} onChange={(event) => setPrepared(event.target.checked)} />
+              <input
+                type="checkbox"
+                checked={prepared}
+                onChange={(event) => {
+                  const nextPrepared = event.target.checked;
+                  setPrepared(nextPrepared);
+                  if (nextPrepared && selectedConceptId) {
+                    const selected = catalogueItems.find(
+                      (item) => item.id === selectedConceptId,
+                    );
+                    if (!preparationMethod) {
+                      setPreparationMethod(selected?.attributes.preparation_notes || "");
+                    }
+                    if (!handled) {
+                      setHandled(selected?.attributes.preparation_contact_notes || "");
+                    }
+                  }
+                }}
+              />
               <span>I prepared this meal</span>
             </label>
             {prepared && (
               <>
                 <label>
-                  What actually touched your skin?
-                  <input value={handled} onChange={(event) => setHandled(event.target.value)} placeholder="e.g. raw tomato, flour dough" />
+                  How did you prepare it this time?
+                  <textarea
+                    rows={3}
+                    value={preparationMethod}
+                    onChange={(event) => setPreparationMethod(event.target.value)}
+                    placeholder="e.g. Chopped the vegetables, mixed by hand, then fried"
+                  />
+                </label>
+                <label>
+                  What actually touched your skin, and how?
+                  <textarea
+                    rows={3}
+                    value={handled}
+                    onChange={(event) => setHandled(event.target.value)}
+                    placeholder="e.g. Chopped raw tomatoes and onion with bare hands; washed the knife with detergent"
+                  />
+                  <span className="field-help">
+                    This is the actual contact for this preparation, not an assumption
+                    based on every recipe ingredient.
+                  </span>
                 </label>
                 <div className="form-grid">
                   <label>Body area<select value={bodyArea} onChange={(event) => setBodyArea(event.target.value)}>{bodyAreas.map((area) => <option value={area.code} key={area.code}>{area.label}</option>)}</select></label>
                   <label className="check-row compact"><input type="checkbox" checked={gloves} onChange={(event) => setGloves(event.target.checked)} /><span>Wore gloves</span></label>
                 </div>
+                {gloves && (
+                  <label>
+                    Glove material
+                    <input
+                      value={gloveMaterial}
+                      onChange={(event) => setGloveMaterial(event.target.value)}
+                      placeholder="e.g. nitrile, latex, rubber"
+                    />
+                  </label>
+                )}
               </>
             )}
           </fieldset>

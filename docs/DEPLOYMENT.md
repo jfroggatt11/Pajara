@@ -159,9 +159,11 @@ On the intended phone:
 3. Save a morning skin check with one photo.
 4. Confirm the Storage object is private.
 5. Log a prepared meal:
-   - record food consumed;
-   - record ingredients actually handled;
-   - choose body area and glove state.
+   - save or select a recipe with its ingredient list, preparation method, and usual
+     preparation-contact prompt;
+   - confirm or correct the method and actual contact for this occurrence;
+   - choose body area, glove state, and glove material where applicable;
+   - verify consumption and preparation/contact appear as linked events.
 6. Add a saved cream or household product:
    - enter any known ingredients;
    - attach a front and ingredient-label photo;
@@ -201,8 +203,9 @@ ready for daily use.
 - Photo comparison supports side-by-side review and an opacity overlay. Automatic
   alignment and synchronized zoom remain later enhancements.
 - Saved meals and recipe variations are available. Recipe-image extraction is still
-  transcription assistance and must be reviewed; it does not establish consumption
-  or skin contact automatically.
+  transcription assistance and must be reviewed. Saved preparation/contact notes are
+  only editable prompts; they do not establish what touched skin on a particular
+  occasion until confirmed in that meal's preparation log.
 - Analysis is deliberately descriptive until enough repeated observations exist.
 - Moonshine browser transcription is currently English-only in this prototype and
   uses a beta package pinned to an exact version.

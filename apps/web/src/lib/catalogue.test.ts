@@ -2,11 +2,8 @@ import {describe, expect, it} from "vitest";
 import type {CatalogueItem} from "../types";
 import {
   catalogueReviewDefaults,
-  formatRecipeIngredientLine,
   mergeIngredientNames,
-  mergeRecipeIngredientLines,
   parseIngredientNames,
-  parseRecipeIngredientLines,
   sortCatalogueItems,
 } from "./catalogue";
 
@@ -78,23 +75,4 @@ describe("catalogue helpers", () => {
     ).toEqual(["Water", "Glycerin", "Aqua", "Citric acid"]);
   });
 
-  it("parses and formats recipe ingredient quantities", () => {
-    expect(
-      parseRecipeIngredientLines("Pasta | 200 | g\nTomato | 2 | whole\nOlive oil"),
-    ).toEqual([
-      {name: "Pasta", amount: 200, unit: "g"},
-      {name: "Tomato", amount: 2, unit: "whole"},
-      {name: "Olive oil"},
-    ]);
-    expect(formatRecipeIngredientLine("Pasta", 200, "g")).toBe("Pasta | 200 | g");
-  });
-
-  it("merges image readings into a recipe without losing entered quantities", () => {
-    expect(
-      mergeRecipeIngredientLines(
-        "Pasta | 200 | g\nTomato | 2 | whole",
-        ["Tomato", {name: "Olive oil", amount: 1, unit: "tbsp"}],
-      ),
-    ).toBe("Pasta | 200 | g\nTomato | 2 | whole\nOlive oil | 1 | tbsp");
-  });
 });

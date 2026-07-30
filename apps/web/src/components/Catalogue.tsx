@@ -4,11 +4,9 @@ import {apiPost} from "../lib/api";
 import {uploadConceptArtifact} from "../lib/artifacts";
 import {
   catalogueReviewDefaults,
-  formatRecipeIngredientLine,
   isSameSuggestion,
-  mergeRecipeIngredientLines,
+  mergeIngredientNames,
   parseIngredientNames,
-  parseRecipeIngredientLines,
 } from "../lib/catalogue";
 import {supabase} from "../lib/supabase";
 import type {
@@ -24,9 +22,6 @@ interface CompositionRow {
   owner_version_id: string | null;
   component_concept_id: string;
   component_order: number | null;
-  amount: number | null;
-  unit: string | null;
-  concentration: string | null;
 }
 
 const itemTypeLabels: Record<CatalogueItemType, string> = {
@@ -58,8 +53,8 @@ export function Catalogue({
   const [category, setCategory] = useState("");
   const [form, setForm] = useState("");
   const [strength, setStrength] = useState("");
-  const [servings, setServings] = useState("");
   const [preparationNotes, setPreparationNotes] = useState("");
+  const [preparationContactNotes, setPreparationContactNotes] = useState("");
   const [ingredients, setIngredients] = useState("");
   const [frontPhoto, setFrontPhoto] = useState<File | null>(null);
   const [labelPhoto, setLabelPhoto] = useState<File | null>(null);
@@ -93,7 +88,7 @@ export function Catalogue({
         supabase
           .from("compositions")
           .select(
-            "owner_concept_id,owner_version_id,component_concept_id,component_order,amount,unit,concentration",
+            "owner_concept_id,owner_version_id,component_concept_id,component_order",
           )
           .in("review_state", ["accepted", "corrected"])
           .order("component_order"),
@@ -201,17 +196,6 @@ export function Catalogue({
         row.owner_concept_id === item.id
         && (!version || row.owner_version_id === version.id),
     );
-    if (item.concept_type === "recipe") {
-      return rows
-        .map((row) => {
-          const ingredientName = ingredientLookup[row.component_concept_id];
-          return ingredientName
-            ? formatRecipeIngredientLine(ingredientName, row.amount, row.unit)
-            : "";
-        })
-        .filter(Boolean)
-        .join("\n");
-    }
     return rows
       .map((row) => ingredientLookup[row.component_concept_id])
       .filter(Boolean)
@@ -225,8 +209,8 @@ export function Catalogue({
     setCategory("");
     setForm("");
     setStrength("");
-    setServings("");
     setPreparationNotes("");
+    setPreparationContactNotes("");
     setIngredients("");
     setFrontPhoto(null);
     setLabelPhoto(null);
@@ -250,10 +234,8 @@ export function Catalogue({
     setCategory(item.attributes.category || "");
     setForm(item.attributes.form || "");
     setStrength(item.attributes.strength || "");
-    setServings(
-      item.attributes.servings === undefined ? "" : String(item.attributes.servings),
-    );
     setPreparationNotes(item.attributes.preparation_notes || "");
+    setPreparationContactNotes(item.attributes.preparation_contact_notes || "");
     setIngredients(currentCompositionText(item));
     setEditingItemId(item.id);
     setDerivedFromId(null);
@@ -272,10 +254,8 @@ export function Catalogue({
     setCategory(item.attributes.category || "");
     setForm("");
     setStrength("");
-    setServings(
-      item.attributes.servings === undefined ? "" : String(item.attributes.servings),
-    );
     setPreparationNotes(item.attributes.preparation_notes || "");
+    setPreparationContactNotes(item.attributes.preparation_contact_notes || "");
     setIngredients(currentCompositionText(item));
     setEditingItemId(null);
     setDerivedFromId(item.id);
@@ -313,9 +293,7 @@ export function Catalogue({
     setSuccess(null);
     try {
       const parsedIngredients =
-        type === "recipe"
-          ? parseRecipeIngredientLines(ingredients)
-          : parseIngredientNames(ingredients);
+        parseIngredientNames(ingredients);
       const {data: concept, error: createError} = await supabase.rpc(
         "save_catalogue_item",
         {
@@ -327,8 +305,8 @@ export function Catalogue({
             category: category.trim(),
             form: form.trim(),
             strength: strength.trim(),
-            servings: servings ? Number(servings) : null,
             preparation_notes: preparationNotes.trim(),
+            preparation_contact_notes: preparationContactNotes.trim(),
             favorite: editingItem?.attributes.favorite || false,
           },
           ingredients: parsedIngredients,
@@ -429,10 +407,10 @@ export function Catalogue({
             || "",
           brand: "",
           variant: "",
-          ingredients: mergeRecipeIngredientLines(
-            currentCompositionText(item),
-            extraction.proposal?.ingredients || [],
-          ),
+          ingredients: mergeIngredientNames(
+            currentIngredientNames(item.id),
+            (extraction.proposal?.ingredients || []).map(({name}) => name),
+          ).join("\n"),
         }
       );
     }
@@ -455,12 +433,9 @@ export function Catalogue({
     setBusy(true);
     setError(null);
     try {
-      const parsedIngredients =
-        reviewedItem?.concept_type === "recipe"
-          ? parseRecipeIngredientLines(edit.ingredients)
-          : parseIngredientNames(edit.ingredients).map((ingredientName) => ({
-              name: ingredientName,
-            }));
+      const parsedIngredients = parseIngredientNames(edit.ingredients).map(
+        (ingredientName) => ({name: ingredientName}),
+      );
       const reviewedIngredients = parsedIngredients.map((ingredient) => {
         const proposed = extraction.proposal?.ingredients?.find(
           (item) => item.name.toLocaleLowerCase() === ingredient.name.toLocaleLowerCase(),
@@ -675,18 +650,6 @@ export function Catalogue({
               </label>
             </>
           )}
-          {type === "recipe" && (
-            <label>
-              Servings
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={servings}
-                onChange={(event) => setServings(event.target.value)}
-              />
-            </label>
-          )}
           </div>
           <label>
             {type === "recipe" ? "Recipe ingredients" : "Known ingredients"}
@@ -696,20 +659,35 @@ export function Catalogue({
               onChange={(event) => setIngredients(event.target.value)}
               placeholder={
                 type === "recipe"
-                  ? "One per line: ingredient | amount | unit\ne.g. Pasta | 200 | g"
+                  ? "One ingredient per line, e.g. pasta, tomato, olive oil"
                   : "One ingredient per line, or paste a comma-separated list"
               }
             />
           </label>
           {type === "recipe" && (
             <label>
-              Preparation notes
+              Preparation method
               <textarea
                 rows={4}
                 value={preparationNotes}
                 onChange={(event) => setPreparationNotes(event.target.value)}
-                placeholder="Method, substitutions, cooking details, or anything that defines this meal"
+                placeholder="e.g. Chop the tomatoes, fry the onion, then simmer everything together"
               />
+            </label>
+          )}
+          {type === "recipe" && (
+            <label>
+              Usual skin contact while preparing
+              <textarea
+                rows={4}
+                value={preparationContactNotes}
+                onChange={(event) => setPreparationContactNotes(event.target.value)}
+                placeholder="e.g. Chop tomatoes and onion with bare hands; knead the dough; wash the pan with detergent"
+              />
+              <span className="field-help">
+                This is a reusable starting point only. You will confirm what actually
+                touched your skin each time you log the meal.
+              </span>
             </label>
           )}
           <div className="form-grid">
@@ -958,9 +936,7 @@ export function Catalogue({
                             })}
                       />
                         <span className="field-help">
-                          Existing ingredients
-                          {isRecipe ? " and quantities " : " "}
-                          are retained and new AI readings are merged in.
+                          Existing ingredients are retained and new AI readings are merged in.
                           Remove a line here only if you intend to remove it from the new
                           formulation version.
                         </span>
@@ -1002,7 +978,8 @@ export function Catalogue({
                       </div>
                       <p className="evidence">
                         Saving updates {reviewedItem?.canonical_name || "this saved item"} and
-                        creates a formulation history entry. It does not create a second item.
+                        creates a {isRecipe ? "recipe" : "formulation"} history entry. It does
+                        not create a second item.
                       </p>
                     </div>
                   )}
@@ -1056,10 +1033,6 @@ export function Catalogue({
                     {item.attributes.variant && <span>{item.attributes.variant}</span>}
                     {item.attributes.form && <span>{item.attributes.form}</span>}
                     {item.attributes.strength && <span>{item.attributes.strength}</span>}
-                    {item.attributes.servings !== undefined
-                      && item.attributes.servings !== null && (
-                      <span>{item.attributes.servings} servings</span>
-                    )}
                     {version && (
                       <span>
                         {item.concept_type === "recipe" ? "recipe" : "formulation"}{" "}
@@ -1076,7 +1049,14 @@ export function Catalogue({
                   </p>
                   {item.concept_type === "recipe" && item.attributes.preparation_notes && (
                     <p className="recipe-preparation-notes">
-                      {item.attributes.preparation_notes}
+                      <strong>Method:</strong> {item.attributes.preparation_notes}
+                    </p>
+                  )}
+                  {item.concept_type === "recipe"
+                    && item.attributes.preparation_contact_notes && (
+                    <p className="recipe-preparation-notes">
+                      <strong>Usual preparation contact:</strong>{" "}
+                      {item.attributes.preparation_contact_notes}
                     </p>
                   )}
                   <div className="button-row catalogue-item-actions">

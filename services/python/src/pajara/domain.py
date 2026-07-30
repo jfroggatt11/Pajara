@@ -83,8 +83,6 @@ class ExtractionProposal(BaseModel):
 
 class IngredientProposal(BaseModel):
     name: str = Field(min_length=1, max_length=240)
-    amount: float | None = Field(default=None, ge=0)
-    unit: str | None = Field(default=None, max_length=80)
     confidence: float = Field(ge=0, le=1)
     evidence: str = Field(max_length=500)
 

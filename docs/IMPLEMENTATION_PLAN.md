@@ -329,11 +329,12 @@ by the user:
 
 The current Saved items screen implements reusable products, medications, topical
 treatments, meals, and recipes. Users can edit an item by creating a new immutable
-version, or create a separate recipe variation linked with `derived_from`. Manual
-ingredients and recipe quantities are preserved when optional image extraction is
+version, or create a separate recipe variation linked with `derived_from`. Saved recipes
+capture ingredient names, preparation method, and a reusable description of likely
+preparation contact. Manual ingredients are preserved when optional image extraction is
 reviewed. Private reference/ingredient images, favourites, and archiving are supported.
-Quick Log records the selected catalogue concept and its active immutable version;
-meal logs can additionally record servings consumed. Meal preparation/contact remains
+Quick Log records the selected catalogue concept and its active immutable version.
+Saved preparation details prefill an editable preparation record; actual contact remains
 a distinct linked event rather than being inferred from the recipe ingredient list.
 
 ### 6.5 AI proposals and revisions
@@ -732,6 +733,7 @@ environments and are the next operational work.
 
 - saved recipe/meal templates and immutable versions;
 - “log again” versus “create variation” using `derived_from`;
+- reusable preparation methods and contact prompts, corrected for each occurrence;
 - actual meal consumption linked separately from preparation/contact and cleanup.
 
 ### M2 — useful feedback and ownership

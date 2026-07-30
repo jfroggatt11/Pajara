@@ -286,8 +286,8 @@ await database.exec(`
   select public.save_catalogue_item(
     'recipe',
     'Tomato pasta',
-    '{"servings":2,"preparation_notes":"Simmer sauce"}'::jsonb,
-    '[{"name":"Pasta","amount":200,"unit":"g"},{"name":"Tomato","amount":2,"unit":"whole"}]'::jsonb,
+    '{"preparation_notes":"Chop tomatoes and simmer sauce","preparation_contact_notes":"Chop tomatoes with bare hands"}'::jsonb,
+    '["Pasta","Tomato"]'::jsonb,
     null,
     null
   );
@@ -295,8 +295,8 @@ await database.exec(`
   select public.save_catalogue_item(
     'recipe',
     'Tomato pasta with spinach',
-    '{"servings":2,"preparation_notes":"Add spinach"}'::jsonb,
-    '[{"name":"Pasta","amount":200,"unit":"g"},{"name":"Tomato","amount":2,"unit":"whole"},{"name":"Spinach","amount":100,"unit":"g"}]'::jsonb,
+    '{"preparation_notes":"Chop tomatoes, add spinach, and simmer","preparation_contact_notes":"Chop tomatoes and spinach with bare hands"}'::jsonb,
+    '["Pasta","Tomato","Spinach"]'::jsonb,
     null,
     (
       select id from public.concepts
@@ -328,15 +328,14 @@ const recipeVariationRelations = await scalar(`
   select count(*) from public.concept_relations
   where user_id = '${userA}' and predicate = 'derived_from'
 `);
-const structuredRecipeAmounts = await scalar(`
+const recipePreparationDetails = await scalar(`
   select count(*)
-  from public.compositions composition
-  join public.concepts recipe on recipe.id = composition.owner_concept_id
+  from public.concepts recipe
   where
     recipe.user_id = '${userA}'
     and recipe.concept_type = 'recipe'
-    and composition.amount is not null
-    and composition.unit is not null
+    and nullif(recipe.attributes ->> 'preparation_notes', '') is not null
+    and nullif(recipe.attributes ->> 'preparation_contact_notes', '') is not null
 `);
 const retainedHistoricalVersionLinks = await scalar(`
   select count(*)
@@ -354,7 +353,7 @@ if (
   && editedItemVersions === 3
   && recipeCount === 2
   && recipeVariationRelations === 1
-  && structuredRecipeAmounts === 5
+  && recipePreparationDetails === 2
   && retainedHistoricalVersionLinks === 1
 ) {
   console.log("PASS editable catalogue items and derived recipe variations: 1");
@@ -363,7 +362,7 @@ if (
   console.error(
     "FAIL editable catalogue/recipe variation "
       + `(${editedItemCount}/${editedItemVersions}/${recipeCount}/`
-      + `${recipeVariationRelations}/${structuredRecipeAmounts}/`
+      + `${recipeVariationRelations}/${recipePreparationDetails}/`
       + `${retainedHistoricalVersionLinks})`,
   );
 }
