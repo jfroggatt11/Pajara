@@ -37,9 +37,11 @@ arguments, or the frontend.
    npx supabase db push --include-seed
    ```
 
-   For an existing Pajara project, confirm that
-   `202607290002_catalogue.sql` is listed before approving the push. It creates the
-   catalogue/version/review tables and functions; it does not replace existing logs.
+   For an existing Pajara project, confirm that the catalogue migrations
+   `202607290002_catalogue.sql`, `202607290003_safe_catalogue_review.sql`, and
+   `202607290004_editable_catalogue_recipes.sql` are listed before approving the push.
+   They add versioned saved items, preserve manual data during image review, and add
+   editable recipes/variations; they do not replace existing logs.
 
 5. In Authentication:
    - set the initial Site URL to the eventual Netlify production URL;
@@ -198,8 +200,9 @@ ready for daily use.
   backups must still mirror Storage independently.
 - Photo comparison supports side-by-side review and an opacity overlay. Automatic
   alignment and synchronized zoom remain later enhancements.
-- Saved meals and recipe variations are not implemented yet. Meals still support
-  free-text capture and distinct preparation/contact logging.
+- Saved meals and recipe variations are available. Recipe-image extraction is still
+  transcription assistance and must be reviewed; it does not establish consumption
+  or skin contact automatically.
 - Analysis is deliberately descriptive until enough repeated observations exist.
 - Moonshine browser transcription is currently English-only in this prototype and
   uses a beta package pinned to an exact version.

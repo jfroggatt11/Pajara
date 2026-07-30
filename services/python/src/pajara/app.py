@@ -166,7 +166,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if active_settings.extraction_provider == "openai"
                     else "deterministic-v1"
                 ),
-                "prompt_version": "product-label-v1",
+                "prompt_version": "catalogue-image-v2",
                 "status": "queued",
             },
         )

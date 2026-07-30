@@ -327,10 +327,14 @@ by the user:
   cleanup;
 - a linked cleanup/handwashing contact may record soap, detergent, or gloves.
 
-The current Saved items screen implements reusable products, medications, and topical
-treatments. It accepts manual ingredients plus private front/ingredient-label images,
-supports favourites and archiving, and queues optional label extraction. Quick Log
-references both the catalogue concept and its active immutable version.
+The current Saved items screen implements reusable products, medications, topical
+treatments, meals, and recipes. Users can edit an item by creating a new immutable
+version, or create a separate recipe variation linked with `derived_from`. Manual
+ingredients and recipe quantities are preserved when optional image extraction is
+reviewed. Private reference/ingredient images, favourites, and archiving are supported.
+Quick Log records the selected catalogue concept and its active immutable version;
+meal logs can additionally record servings consumed. Meal preparation/contact remains
+a distinct linked event rather than being inferred from the recipe ingredient list.
 
 ### 6.5 AI proposals and revisions
 
@@ -724,7 +728,7 @@ environments and are the next operational work.
 - favourites, recency, archiving, and saved-item selection in Quick Log;
 - shower, bath, and washing-up shortcuts with multi-product contact links.
 
-**Next: M1.6 Reusable meals**
+**M1.6 Reusable meals**
 
 - saved recipe/meal templates and immutable versions;
 - “log again” versus “create variation” using `derived_from`;

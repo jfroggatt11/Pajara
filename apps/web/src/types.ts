@@ -65,7 +65,7 @@ export interface FieldAssertion {
   };
 }
 
-export type CatalogueItemType = "product" | "medication" | "treatment";
+export type CatalogueItemType = "product" | "medication" | "treatment" | "recipe";
 
 export interface CatalogueItem {
   id: string;
@@ -80,6 +80,8 @@ export interface CatalogueItem {
     strength?: string;
     favorite?: boolean;
     last_used_at?: string;
+    servings?: number;
+    preparation_notes?: string;
   };
   archived_at: string | null;
   created_at: string;
@@ -115,6 +117,8 @@ export interface CatalogueExtraction {
     variant_evidence?: string | null;
     ingredients?: Array<{
       name: string;
+      amount?: number | null;
+      unit?: string | null;
       confidence: number;
       evidence: string;
     }>;

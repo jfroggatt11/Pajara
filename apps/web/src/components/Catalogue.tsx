@@ -4,8 +4,11 @@ import {apiPost} from "../lib/api";
 import {uploadConceptArtifact} from "../lib/artifacts";
 import {
   catalogueReviewDefaults,
+  formatRecipeIngredientLine,
   isSameSuggestion,
+  mergeRecipeIngredientLines,
   parseIngredientNames,
+  parseRecipeIngredientLines,
 } from "../lib/catalogue";
 import {supabase} from "../lib/supabase";
 import type {
@@ -21,12 +24,16 @@ interface CompositionRow {
   owner_version_id: string | null;
   component_concept_id: string;
   component_order: number | null;
+  amount: number | null;
+  unit: string | null;
+  concentration: string | null;
 }
 
 const itemTypeLabels: Record<CatalogueItemType, string> = {
   product: "Personal / household product",
   medication: "Medication",
   treatment: "Cream / topical treatment",
+  recipe: "Meal / recipe",
 };
 
 export function Catalogue({
@@ -51,11 +58,15 @@ export function Catalogue({
   const [category, setCategory] = useState("");
   const [form, setForm] = useState("");
   const [strength, setStrength] = useState("");
+  const [servings, setServings] = useState("");
+  const [preparationNotes, setPreparationNotes] = useState("");
   const [ingredients, setIngredients] = useState("");
   const [frontPhoto, setFrontPhoto] = useState<File | null>(null);
   const [labelPhoto, setLabelPhoto] = useState<File | null>(null);
   const [requestAi, setRequestAi] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [derivedFromId, setDerivedFromId] = useState<string | null>(null);
   const [reviewEdits, setReviewEdits] = useState<
     Record<string, {name: string; brand: string; variant: string; ingredients: string}>
   >({});
@@ -63,6 +74,7 @@ export function Catalogue({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const initializedCreateState = useRef(false);
+  const editorRef = useRef<HTMLFormElement>(null);
 
   const load = useCallback(async () => {
     const [itemsResult, versionsResult, compositionsResult, ingredientsResult, extractionResult] =
@@ -70,7 +82,7 @@ export function Catalogue({
         supabase
           .from("concepts")
           .select("*")
-          .in("concept_type", ["product", "medication", "treatment"])
+          .in("concept_type", ["product", "medication", "treatment", "recipe"])
           .is("archived_at", null)
           .order("canonical_name"),
         supabase
@@ -80,7 +92,9 @@ export function Catalogue({
           .order("version_number", {ascending: false}),
         supabase
           .from("compositions")
-          .select("owner_concept_id,owner_version_id,component_concept_id,component_order")
+          .select(
+            "owner_concept_id,owner_version_id,component_concept_id,component_order,amount,unit,concentration",
+          )
           .in("review_state", ["accepted", "corrected"])
           .order("component_order"),
         supabase
@@ -180,6 +194,30 @@ export function Catalogue({
       .filter(Boolean);
   }
 
+  function currentCompositionText(item: CatalogueItem): string {
+    const version = currentVersionByConcept[item.id];
+    const rows = compositions.filter(
+      (row) =>
+        row.owner_concept_id === item.id
+        && (!version || row.owner_version_id === version.id),
+    );
+    if (item.concept_type === "recipe") {
+      return rows
+        .map((row) => {
+          const ingredientName = ingredientLookup[row.component_concept_id];
+          return ingredientName
+            ? formatRecipeIngredientLine(ingredientName, row.amount, row.unit)
+            : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+    return rows
+      .map((row) => ingredientLookup[row.component_concept_id])
+      .filter(Boolean)
+      .join("\n");
+  }
+
   function resetCreateForm() {
     setName("");
     setBrand("");
@@ -187,15 +225,74 @@ export function Catalogue({
     setCategory("");
     setForm("");
     setStrength("");
+    setServings("");
+    setPreparationNotes("");
     setIngredients("");
     setFrontPhoto(null);
     setLabelPhoto(null);
+    setEditingItemId(null);
+    setDerivedFromId(null);
+  }
+
+  function showEditor() {
+    setShowCreate(true);
+    window.setTimeout(
+      () => editorRef.current?.scrollIntoView({behavior: "smooth", block: "start"}),
+      0,
+    );
+  }
+
+  function startEdit(item: CatalogueItem) {
+    setType(item.concept_type);
+    setName(item.canonical_name);
+    setBrand(item.attributes.brand || "");
+    setVariant(item.attributes.variant || "");
+    setCategory(item.attributes.category || "");
+    setForm(item.attributes.form || "");
+    setStrength(item.attributes.strength || "");
+    setServings(
+      item.attributes.servings === undefined ? "" : String(item.attributes.servings),
+    );
+    setPreparationNotes(item.attributes.preparation_notes || "");
+    setIngredients(currentCompositionText(item));
+    setEditingItemId(item.id);
+    setDerivedFromId(null);
+    setFrontPhoto(null);
+    setLabelPhoto(null);
+    setError(null);
+    setSuccess(null);
+    showEditor();
+  }
+
+  function startVariation(item: CatalogueItem) {
+    setType("recipe");
+    setName(`${item.canonical_name} variation`);
+    setBrand("");
+    setVariant("");
+    setCategory(item.attributes.category || "");
+    setForm("");
+    setStrength("");
+    setServings(
+      item.attributes.servings === undefined ? "" : String(item.attributes.servings),
+    );
+    setPreparationNotes(item.attributes.preparation_notes || "");
+    setIngredients(currentCompositionText(item));
+    setEditingItemId(null);
+    setDerivedFromId(item.id);
+    setFrontPhoto(null);
+    setLabelPhoto(null);
+    setError(null);
+    setSuccess(null);
+    showEditor();
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const editingItem = items.find((item) => item.id === editingItemId);
     const duplicate = items.find(
       (item) =>
+        item.id !== editingItemId
+        &&
         item.canonical_name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase()
         && (item.attributes.brand || "").trim().toLocaleLowerCase()
           === brand.trim().toLocaleLowerCase()
@@ -215,9 +312,12 @@ export function Catalogue({
     setError(null);
     setSuccess(null);
     try {
-      const parsedIngredients = parseIngredientNames(ingredients);
+      const parsedIngredients =
+        type === "recipe"
+          ? parseRecipeIngredientLines(ingredients)
+          : parseIngredientNames(ingredients);
       const {data: concept, error: createError} = await supabase.rpc(
-        "create_catalogue_item",
+        "save_catalogue_item",
         {
           item_type: type,
           item_name: name,
@@ -227,9 +327,13 @@ export function Catalogue({
             category: category.trim(),
             form: form.trim(),
             strength: strength.trim(),
-            favorite: false,
+            servings: servings ? Number(servings) : null,
+            preparation_notes: preparationNotes.trim(),
+            favorite: editingItem?.attributes.favorite || false,
           },
           ingredients: parsedIngredients,
+          catalogue_item_id: editingItemId,
+          derived_from_id: derivedFromId,
         },
       );
       if (createError) throw createError;
@@ -282,12 +386,24 @@ export function Catalogue({
           postSaveWarnings.push("the ingredient-label photo did not upload");
         }
       }
+      const completedEdit = Boolean(editingItemId);
+      const completedVariation = Boolean(derivedFromId);
       resetCreateForm();
       setShowCreate(false);
       setSuccess(
         labelPhoto && requestAi && postSaveWarnings.length === 0
-          ? "Saved. The label extraction is queued and must be reviewed."
-          : "Saved to your catalogue.",
+          ? `${
+              completedEdit
+                ? "Changes saved."
+                : completedVariation
+                  ? "Recipe variation created."
+                  : "Saved."
+            } The image extraction is queued and must be reviewed.`
+          : completedEdit
+            ? "Saved item updated. Earlier logged versions were retained."
+            : completedVariation
+              ? "Recipe variation created and linked to the original."
+              : "Saved to your catalogue.",
       );
       if (postSaveWarnings.length > 0) {
         setError(`The item was saved, but ${postSaveWarnings.join(" and ")}.`);
@@ -303,6 +419,23 @@ export function Catalogue({
 
   function extractionEdit(extraction: CatalogueExtraction) {
     const item = items.find((candidate) => candidate.id === extraction.concept_id);
+    if (item?.concept_type === "recipe") {
+      return (
+        reviewEdits[extraction.id]
+        || {
+          name:
+            item.canonical_name.trim()
+            || extraction.proposal?.product_name?.trim()
+            || "",
+          brand: "",
+          variant: "",
+          ingredients: mergeRecipeIngredientLines(
+            currentCompositionText(item),
+            extraction.proposal?.ingredients || [],
+          ),
+        }
+      );
+    }
     return (
       reviewEdits[extraction.id]
       || catalogueReviewDefaults(
@@ -318,20 +451,27 @@ export function Catalogue({
     decision: "corrected" | "rejected",
   ) {
     const edit = extractionEdit(extraction);
+    const reviewedItem = items.find((item) => item.id === extraction.concept_id);
     setBusy(true);
     setError(null);
     try {
-      const reviewedIngredients = parseIngredientNames(edit.ingredients).map((ingredientName) => {
+      const parsedIngredients =
+        reviewedItem?.concept_type === "recipe"
+          ? parseRecipeIngredientLines(edit.ingredients)
+          : parseIngredientNames(edit.ingredients).map((ingredientName) => ({
+              name: ingredientName,
+            }));
+      const reviewedIngredients = parsedIngredients.map((ingredient) => {
         const proposed = extraction.proposal?.ingredients?.find(
-          (item) => item.name.toLocaleLowerCase() === ingredientName.toLocaleLowerCase(),
+          (item) => item.name.toLocaleLowerCase() === ingredient.name.toLocaleLowerCase(),
         );
         return proposed
           ? {
-              name: ingredientName,
+              ...ingredient,
               confidence: proposed.confidence,
               evidence: proposed.evidence,
             }
-          : {name: ingredientName};
+          : ingredient;
       });
       const {error: reviewError} = await supabase.rpc("review_catalogue_extraction", {
         extraction_id: extraction.id,
@@ -350,7 +490,9 @@ export function Catalogue({
       setSuccess(
         decision === "rejected"
           ? "Proposal rejected. Your existing catalogue data was unchanged."
-          : "Reviewed label saved as a new product version.",
+          : reviewedItem?.concept_type === "recipe"
+            ? "Reviewed recipe image saved as a new recipe version."
+            : "Reviewed label saved as a new product version.",
       );
       await load();
       onChanged();
@@ -407,7 +549,9 @@ export function Catalogue({
       <header className="page-header">
         <div><span className="eyebrow">Reusable exposures</span><h1>Saved items</h1></div>
         <div className="saved-items-header-actions">
-          <p>Create a product once, then select it whenever you use or contact it.</p>
+          <p>
+            Save products and recipes once, then select the exact version whenever you use them.
+          </p>
           {!showCreate && !hasActionableReview && (
             <button
               className="primary"
@@ -425,11 +569,23 @@ export function Catalogue({
       <StatusMessage error={error} success={success} />
 
       {showCreate && (
-        <form className="stack card create-item-card" onSubmit={submit}>
+        <form className="stack card create-item-card" onSubmit={submit} ref={editorRef}>
           <div className="section-heading">
             <div>
-              <span className="eyebrow">New catalogue entry</span>
-              <h2>Create a saved item</h2>
+              <span className="eyebrow">
+                {editingItemId
+                  ? "Versioned correction"
+                  : derivedFromId
+                    ? "Recipe variation"
+                    : "New catalogue entry"}
+              </span>
+              <h2>
+                {editingItemId
+                  ? `Edit ${name}`
+                  : derivedFromId
+                    ? "Create recipe variation"
+                    : "Create a saved item"}
+              </h2>
             </div>
             {items.length > 0 && (
               <button
@@ -445,14 +601,21 @@ export function Catalogue({
             )}
           </div>
           <p className="evidence">
-            This creates one reusable item. If you add a label photo, its AI review will
-            update this same item rather than creating another.
+            {editingItemId
+              ? "Saving creates a new version of this same item. Earlier logged events keep "
+                + "the version that was used at the time."
+              : derivedFromId
+                ? "This creates a separate recipe linked to its source, so future changes "
+                  + "do not alter the original meal."
+                : "This creates one reusable item. If you add an image, its AI review will "
+                  + "update this same item rather than creating another."}
           </p>
           <div className="form-grid">
           <label>
             Item type
             <select
               value={type}
+              disabled={Boolean(editingItemId || derivedFromId)}
               onChange={(event) => setType(event.target.value as CatalogueItemType)}
             >
               {Object.entries(itemTypeLabels).map(([value, label]) => (
@@ -461,27 +624,35 @@ export function Catalogue({
             </select>
           </label>
           <label>
-            Product or medication name
+            {type === "recipe" ? "Meal or recipe name" : "Product or medication name"}
             <input required value={name} onChange={(event) => setName(event.target.value)} />
           </label>
-          <label>
-            Brand
-            <input value={brand} onChange={(event) => setBrand(event.target.value)} />
-          </label>
-          <label>
-            Variant
-            <input
-              value={variant}
-              onChange={(event) => setVariant(event.target.value)}
-              placeholder="e.g. fragrance free, sensitive"
-            />
-          </label>
+          {type !== "recipe" && (
+            <>
+              <label>
+                Brand
+                <input value={brand} onChange={(event) => setBrand(event.target.value)} />
+              </label>
+              <label>
+                Variant
+                <input
+                  value={variant}
+                  onChange={(event) => setVariant(event.target.value)}
+                  placeholder="e.g. fragrance free, sensitive"
+                />
+              </label>
+            </>
+          )}
           <label>
             Category
             <input
               value={category}
               onChange={(event) => setCategory(event.target.value)}
-              placeholder="e.g. shampoo, washing-up liquid, moisturiser"
+              placeholder={
+                type === "recipe"
+                  ? "e.g. breakfast, pasta, soup"
+                  : "e.g. shampoo, washing-up liquid, moisturiser"
+              }
             />
           </label>
           {(type === "medication" || type === "treatment") && (
@@ -504,29 +675,62 @@ export function Catalogue({
               </label>
             </>
           )}
+          {type === "recipe" && (
+            <label>
+              Servings
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={servings}
+                onChange={(event) => setServings(event.target.value)}
+              />
+            </label>
+          )}
           </div>
           <label>
-          Known ingredients
-          <textarea
-            rows={4}
-            value={ingredients}
-            onChange={(event) => setIngredients(event.target.value)}
-            placeholder="One ingredient per line, or paste a comma-separated list"
-          />
+            {type === "recipe" ? "Recipe ingredients" : "Known ingredients"}
+            <textarea
+              rows={type === "recipe" ? 7 : 4}
+              value={ingredients}
+              onChange={(event) => setIngredients(event.target.value)}
+              placeholder={
+                type === "recipe"
+                  ? "One per line: ingredient | amount | unit\ne.g. Pasta | 200 | g"
+                  : "One ingredient per line, or paste a comma-separated list"
+              }
+            />
           </label>
+          {type === "recipe" && (
+            <label>
+              Preparation notes
+              <textarea
+                rows={4}
+                value={preparationNotes}
+                onChange={(event) => setPreparationNotes(event.target.value)}
+                placeholder="Method, substitutions, cooking details, or anything that defines this meal"
+              />
+            </label>
+          )}
           <div className="form-grid">
           <label className="upload-zone">
-            <strong>Front photo</strong>
+            <strong>{type === "recipe" ? "Meal photo" : "Front photo"}</strong>
             <input
               type="file"
               accept="image/*"
               capture="environment"
               onChange={(event) => setFrontPhoto(event.target.files?.[0] || null)}
             />
-            <span>Optional product identity and packaging reference.</span>
+            <span>
+              {type === "recipe"
+                ? "Optional reference photo for the saved meal."
+                : "Optional product identity and packaging reference."}
+            </span>
           </label>
           <label className="upload-zone">
-            <strong>Ingredient-label photo</strong>
+            <strong>
+              {type === "recipe" ? "Recipe / ingredient photo" : "Ingredient-label photo"}
+            </strong>
             <input
               type="file"
               accept="image/*"
@@ -544,12 +748,19 @@ export function Catalogue({
                 onChange={(event) => setRequestAi(event.target.checked)}
               />
               <span>
-                Ask AI to read this label. Extracted fields remain proposals until reviewed.
+                Ask AI to read this {type === "recipe" ? "recipe image" : "label"}.
+                Extracted fields remain proposals until reviewed.
               </span>
             </label>
           )}
           <button className="primary" disabled={busy || !name.trim()}>
-            {busy ? "Creating…" : "Create saved item"}
+            {busy
+              ? "Saving…"
+              : editingItemId
+                ? "Save changes"
+                : derivedFromId
+                  ? "Create variation"
+                  : "Create saved item"}
           </button>
         </form>
       )}
@@ -557,17 +768,18 @@ export function Catalogue({
       {extractions.length > 0 && (
         <section className="catalogue-section">
           <div className="section-heading">
-            <div><span className="eyebrow">Human confirmation</span><h2>Label review</h2></div>
+            <div><span className="eyebrow">Human confirmation</span><h2>Image review</h2></div>
             <button className="secondary small" onClick={() => void load()}>Refresh</button>
           </div>
           <div className="stack">
             {extractions.map((extraction) => {
               const edit = extractionEdit(extraction);
               const reviewedItem = items.find((item) => item.id === extraction.concept_id);
+              const isRecipe = reviewedItem?.concept_type === "recipe";
               return (
                 <article className="card" key={extraction.id}>
                   <div className="timeline-title">
-                    <h2>{reviewedItem?.canonical_name || "Product label"}</h2>
+                    <h2>{reviewedItem?.canonical_name || "Saved item image"}</h2>
                     <span className={`trust ${extraction.status}`}>{extraction.status}</span>
                   </div>
                   {extraction.status === "failed" ? (
@@ -584,7 +796,7 @@ export function Catalogue({
                       </button>
                     </div>
                   ) : extraction.status !== "succeeded" ? (
-                    <p className="evidence">The worker is processing this private label image.</p>
+                      <p className="evidence">The worker is processing this private image.</p>
                   ) : (
                     <div className="stack">
                       <div className="review-merge-notice">
@@ -598,7 +810,11 @@ export function Catalogue({
                         <figure className="label-preview">
                           <img
                             src={labelPreviewUrls[extraction.artifact_id]}
-                            alt="Original private ingredient-label photograph"
+                            alt={
+                              isRecipe
+                                ? "Original private recipe or ingredient photograph"
+                                : "Original private ingredient-label photograph"
+                            }
                           />
                           <figcaption>
                             Original label · private link expires after 15 minutes
@@ -607,7 +823,7 @@ export function Catalogue({
                       )}
                       <div className="form-grid">
                         <label>
-                          Product name
+                          {isRecipe ? "Meal or recipe name" : "Product name"}
                           <input
                             value={edit.name}
                             onChange={(event) =>
@@ -634,68 +850,72 @@ export function Catalogue({
                             </button>
                           )}
                         </label>
-                        <label>
-                          Brand
-                          <input
-                            value={edit.brand}
-                            onChange={(event) =>
-                              setReviewEdits({
-                                ...reviewEdits,
-                                [extraction.id]: {...edit, brand: event.target.value},
-                              })}
-                          />
-                          {extraction.proposal?.brand
-                            && !isSameSuggestion(edit.brand, extraction.proposal.brand) && (
-                            <button
-                              type="button"
-                              className="suggestion-button"
-                              onClick={() =>
-                                setReviewEdits({
-                                  ...reviewEdits,
-                                  [extraction.id]: {
-                                    ...edit,
-                                    brand: extraction.proposal?.brand || edit.brand,
-                                  },
-                                })}
-                            >
-                              Use AI suggestion: {extraction.proposal.brand}
-                            </button>
-                          )}
-                        </label>
-                        <label>
-                          Variant
-                          <input
-                            value={edit.variant}
-                            onChange={(event) =>
-                              setReviewEdits({
-                                ...reviewEdits,
-                                [extraction.id]: {...edit, variant: event.target.value},
-                              })}
-                          />
-                          {extraction.proposal?.variant
-                            && !isSameSuggestion(edit.variant, extraction.proposal.variant) && (
-                            <button
-                              type="button"
-                              className="suggestion-button"
-                              onClick={() =>
-                                setReviewEdits({
-                                  ...reviewEdits,
-                                  [extraction.id]: {
-                                    ...edit,
-                                    variant: extraction.proposal?.variant || edit.variant,
-                                  },
-                                })}
-                            >
-                              Use AI suggestion: {extraction.proposal.variant}
-                            </button>
-                          )}
-                        </label>
+                        {!isRecipe && (
+                          <>
+                            <label>
+                              Brand
+                              <input
+                                value={edit.brand}
+                                onChange={(event) =>
+                                  setReviewEdits({
+                                    ...reviewEdits,
+                                    [extraction.id]: {...edit, brand: event.target.value},
+                                  })}
+                              />
+                              {extraction.proposal?.brand
+                                && !isSameSuggestion(edit.brand, extraction.proposal.brand) && (
+                                <button
+                                  type="button"
+                                  className="suggestion-button"
+                                  onClick={() =>
+                                    setReviewEdits({
+                                      ...reviewEdits,
+                                      [extraction.id]: {
+                                        ...edit,
+                                        brand: extraction.proposal?.brand || edit.brand,
+                                      },
+                                    })}
+                                >
+                                  Use AI suggestion: {extraction.proposal.brand}
+                                </button>
+                              )}
+                            </label>
+                            <label>
+                              Variant
+                              <input
+                                value={edit.variant}
+                                onChange={(event) =>
+                                  setReviewEdits({
+                                    ...reviewEdits,
+                                    [extraction.id]: {...edit, variant: event.target.value},
+                                  })}
+                              />
+                              {extraction.proposal?.variant
+                                && !isSameSuggestion(edit.variant, extraction.proposal.variant) && (
+                                <button
+                                  type="button"
+                                  className="suggestion-button"
+                                  onClick={() =>
+                                    setReviewEdits({
+                                      ...reviewEdits,
+                                      [extraction.id]: {
+                                        ...edit,
+                                        variant: extraction.proposal?.variant || edit.variant,
+                                      },
+                                    })}
+                                >
+                                  Use AI suggestion: {extraction.proposal.variant}
+                                </button>
+                              )}
+                            </label>
+                          </>
+                        )}
                       </div>
                       <div className="extraction-confidence">
                         {extraction.proposal?.product_name_confidence !== null
                           && extraction.proposal?.product_name_confidence !== undefined && (
                           <p className="evidence">
-                            Product name: {Math.round(
+                            {isRecipe ? "Recipe name" : "Product name"}: {Math.round(
                               extraction.proposal.product_name_confidence * 100,
                             )}% extraction confidence
                             {extraction.proposal.product_name_evidence
@@ -703,7 +923,8 @@ export function Catalogue({
                               : ""}
                           </p>
                         )}
-                        {extraction.proposal?.brand_confidence !== null
+                        {!isRecipe
+                          && extraction.proposal?.brand_confidence !== null
                           && extraction.proposal?.brand_confidence !== undefined && (
                           <p className="evidence">
                             Brand: {Math.round(extraction.proposal.brand_confidence * 100)}%
@@ -713,7 +934,8 @@ export function Catalogue({
                               : ""}
                           </p>
                         )}
-                        {extraction.proposal?.variant_confidence !== null
+                        {!isRecipe
+                          && extraction.proposal?.variant_confidence !== null
                           && extraction.proposal?.variant_confidence !== undefined && (
                           <p className="evidence">
                             Variant: {Math.round(extraction.proposal.variant_confidence * 100)}%
@@ -725,7 +947,7 @@ export function Catalogue({
                         )}
                       </div>
                       <label>
-                        Ordered ingredients
+                        {isRecipe ? "Recipe ingredients" : "Ordered ingredients"}
                         <textarea
                           rows={7}
                           value={edit.ingredients}
@@ -736,7 +958,9 @@ export function Catalogue({
                             })}
                       />
                         <span className="field-help">
-                          Existing ingredients are retained and new AI readings are merged in.
+                          Existing ingredients
+                          {isRecipe ? " and quantities " : " "}
+                          are retained and new AI readings are merged in.
                           Remove a line here only if you intend to remove it from the new
                           formulation version.
                         </span>
@@ -766,7 +990,7 @@ export function Catalogue({
                           disabled={busy}
                           onClick={() => void review(extraction, "corrected")}
                         >
-                          {busy ? "Saving…" : "Save reviewed label"}
+                          {busy ? "Saving…" : `Save reviewed ${isRecipe ? "recipe" : "label"}`}
                         </button>
                         <button
                           className="text-button small"
@@ -807,6 +1031,10 @@ export function Catalogue({
                 )
                 .map((row) => ingredientLookup[row.component_concept_id])
                 .filter(Boolean);
+              const recipeLines =
+                item.concept_type === "recipe"
+                  ? currentCompositionText(item).split("\n").filter(Boolean)
+                  : [];
               return (
                 <article className="card catalogue-item" key={item.id}>
                   <div className="catalogue-item-heading">
@@ -828,16 +1056,42 @@ export function Catalogue({
                     {item.attributes.variant && <span>{item.attributes.variant}</span>}
                     {item.attributes.form && <span>{item.attributes.form}</span>}
                     {item.attributes.strength && <span>{item.attributes.strength}</span>}
-                    {version && <span>formulation v{version.version_number}</span>}
+                    {item.attributes.servings !== undefined
+                      && item.attributes.servings !== null && (
+                      <span>{item.attributes.servings} servings</span>
+                    )}
+                    {version && (
+                      <span>
+                        {item.concept_type === "recipe" ? "recipe" : "formulation"}{" "}
+                        v{version.version_number}
+                      </span>
+                    )}
                   </div>
                   <p className="evidence">
-                    {names.length > 0
-                      ? `${names.length} reviewed ingredient${names.length === 1 ? "" : "s"}: ${names.slice(0, 5).join(", ")}${names.length > 5 ? "…" : ""}`
+                    {recipeLines.length > 0
+                      ? `${recipeLines.length} ingredient${recipeLines.length === 1 ? "" : "s"}: ${recipeLines.slice(0, 4).join(", ")}${recipeLines.length > 4 ? "…" : ""}`
+                      : names.length > 0
+                        ? `${names.length} ingredient${names.length === 1 ? "" : "s"}: ${names.slice(0, 5).join(", ")}${names.length > 5 ? "…" : ""}`
                       : "No reviewed ingredient list yet."}
                   </p>
-                  <button className="text-button small" onClick={() => void archive(item)}>
-                    Archive
-                  </button>
+                  {item.concept_type === "recipe" && item.attributes.preparation_notes && (
+                    <p className="recipe-preparation-notes">
+                      {item.attributes.preparation_notes}
+                    </p>
+                  )}
+                  <div className="button-row catalogue-item-actions">
+                    <button className="secondary small" onClick={() => startEdit(item)}>
+                      Edit
+                    </button>
+                    {item.concept_type === "recipe" && (
+                      <button className="secondary small" onClick={() => startVariation(item)}>
+                        Create variation
+                      </button>
+                    )}
+                    <button className="text-button small" onClick={() => void archive(item)}>
+                      Archive
+                    </button>
+                  </div>
                 </article>
               );
             })}

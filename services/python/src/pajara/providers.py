@@ -27,11 +27,13 @@ probability.
 """.strip()
 
 PRODUCT_LABEL_INSTRUCTIONS = """
-Read a photographed personal-care, household, treatment, or medication product label.
-Extract only text that is visibly supported by the image. Preserve ingredient order.
-Do not expand abbreviations by guessing, infer hidden ingredients, diagnose a condition,
-or recommend starting, stopping, or changing treatment. Use confidence to describe
-transcription certainty only. Put unreadable or ambiguous areas in warnings.
+Read a photographed personal-care, household, treatment, or medication product label,
+or a photographed meal, recipe, or recipe ingredient list. Extract only text that is
+visibly supported by the image and preserve ingredient order. For a recipe, include a
+numeric amount and unit only where both are visibly supported; otherwise leave them
+empty. Do not expand abbreviations by guessing, infer hidden ingredients, diagnose a
+condition, or recommend starting, stopping, or changing treatment. Use confidence to
+describe transcription certainty only. Put unreadable or ambiguous areas in warnings.
 """.strip()
 
 
@@ -151,8 +153,8 @@ class OpenAIExtractionProvider(ExtractionProvider):
                         {
                             "type": "input_text",
                             "text": (
-                                "Extract the product identity and ordered ingredient list "
-                                "from this label image."
+                                "Extract the visible saved-item name and ordered ingredient "
+                                "list from this product label, meal, or recipe image."
                             ),
                         },
                         {

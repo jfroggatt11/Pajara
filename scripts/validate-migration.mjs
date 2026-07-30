@@ -86,6 +86,7 @@ const assertions = [
   ["deletion function", await scalar("select count(*) from pg_proc where proname = 'delete_user_tracking_data'"), 1],
   ["catalogue review function", await scalar("select count(*) from pg_proc where proname = 'review_catalogue_extraction'"), 1],
   ["catalogue create function", await scalar("select count(*) from pg_proc where proname = 'create_catalogue_item'"), 1],
+  ["catalogue save function", await scalar("select count(*) from pg_proc where proname = 'save_catalogue_item'"), 1],
 ];
 
 let failed = false;
@@ -244,6 +245,126 @@ if (
   console.error(
     "FAIL safe catalogue review: empty AI fields replaced manual data "
       + `(${preservedCatalogueFields}/${preservedVersionSnapshot}/${preservedCurrentComponents})`,
+  );
+}
+
+await database.exec(`
+  insert into public.event_concepts (
+    user_id,
+    event_id,
+    concept_id,
+    concept_version_id,
+    role,
+    review_state
+  )
+  select
+    '${userA}',
+    '${ownEventId}',
+    concept.id,
+    version.id,
+    'applied',
+    'accepted'
+  from public.concepts concept
+  join public.concept_versions version on version.concept_id = concept.id
+  where
+    concept.user_id = '${userA}'
+    and concept.canonical_name = 'Test cream'
+    and version.effective_to is null;
+
+  select public.save_catalogue_item(
+    'treatment',
+    'Updated test cream',
+    '{"brand":"Test brand","form":"ointment","strength":"1%"}'::jsonb,
+    '["Water","Petrolatum"]'::jsonb,
+    (
+      select id from public.concepts
+      where user_id = '${userA}' and canonical_name = 'Test cream'
+    ),
+    null
+  );
+
+  select public.save_catalogue_item(
+    'recipe',
+    'Tomato pasta',
+    '{"servings":2,"preparation_notes":"Simmer sauce"}'::jsonb,
+    '[{"name":"Pasta","amount":200,"unit":"g"},{"name":"Tomato","amount":2,"unit":"whole"}]'::jsonb,
+    null,
+    null
+  );
+
+  select public.save_catalogue_item(
+    'recipe',
+    'Tomato pasta with spinach',
+    '{"servings":2,"preparation_notes":"Add spinach"}'::jsonb,
+    '[{"name":"Pasta","amount":200,"unit":"g"},{"name":"Tomato","amount":2,"unit":"whole"},{"name":"Spinach","amount":100,"unit":"g"}]'::jsonb,
+    null,
+    (
+      select id from public.concepts
+      where user_id = '${userA}' and canonical_name = 'Tomato pasta'
+    )
+  );
+`);
+const editedItemCount = await scalar(`
+  select count(*) from public.concepts
+  where
+    user_id = '${userA}'
+    and concept_type = 'treatment'
+    and canonical_name = 'Updated test cream'
+    and attributes ->> 'form' = 'ointment'
+    and attributes ->> 'strength' = '1%'
+`);
+const editedItemVersions = await scalar(`
+  select count(*) from public.concept_versions version
+  join public.concepts concept on concept.id = version.concept_id
+  where
+    concept.user_id = '${userA}'
+    and concept.canonical_name = 'Updated test cream'
+`);
+const recipeCount = await scalar(`
+  select count(*) from public.concepts
+  where user_id = '${userA}' and concept_type = 'recipe'
+`);
+const recipeVariationRelations = await scalar(`
+  select count(*) from public.concept_relations
+  where user_id = '${userA}' and predicate = 'derived_from'
+`);
+const structuredRecipeAmounts = await scalar(`
+  select count(*)
+  from public.compositions composition
+  join public.concepts recipe on recipe.id = composition.owner_concept_id
+  where
+    recipe.user_id = '${userA}'
+    and recipe.concept_type = 'recipe'
+    and composition.amount is not null
+    and composition.unit is not null
+`);
+const retainedHistoricalVersionLinks = await scalar(`
+  select count(*)
+  from public.event_concepts event_concept
+  join public.concept_versions version on version.id = event_concept.concept_version_id
+  join public.concepts concept on concept.id = event_concept.concept_id
+  where
+    event_concept.user_id = '${userA}'
+    and concept.canonical_name = 'Updated test cream'
+    and version.version_number = 2
+    and version.effective_to is not null
+`);
+if (
+  editedItemCount === 1
+  && editedItemVersions === 3
+  && recipeCount === 2
+  && recipeVariationRelations === 1
+  && structuredRecipeAmounts === 5
+  && retainedHistoricalVersionLinks === 1
+) {
+  console.log("PASS editable catalogue items and derived recipe variations: 1");
+} else {
+  failed = true;
+  console.error(
+    "FAIL editable catalogue/recipe variation "
+      + `(${editedItemCount}/${editedItemVersions}/${recipeCount}/`
+      + `${recipeVariationRelations}/${structuredRecipeAmounts}/`
+      + `${retainedHistoricalVersionLinks})`,
   );
 }
 

@@ -86,7 +86,13 @@ class LabelProvider(FakeExtractionProvider):
             product_name="Test wash",
             brand="Example",
             ingredients=[
-                IngredientProposal(name="Water", confidence=0.99, evidence="Water"),
+                IngredientProposal(
+                    name="Water",
+                    amount=250,
+                    unit="ml",
+                    confidence=0.99,
+                    evidence="250 ml Water",
+                ),
                 IngredientProposal(name="Glycerin", confidence=0.91, evidence="Glycerin"),
             ],
         )
@@ -178,4 +184,6 @@ async def test_catalogue_label_extraction_stays_a_proposal() -> None:
     final_update = extraction_client.updates[-1][2]
     assert final_update["status"] == "succeeded"
     assert final_update["proposal"]["ingredients"][0]["name"] == "Water"
+    assert final_update["proposal"]["ingredients"][0]["amount"] == 250
+    assert final_update["proposal"]["ingredients"][0]["unit"] == "ml"
     assert result["ingredient_count"] == 2

@@ -83,7 +83,7 @@ export function QuickLogForm({
       supabase
         .from("concepts")
         .select("*")
-        .in("concept_type", ["product", "medication", "treatment"])
+        .in("concept_type", ["product", "medication", "treatment", "recipe"])
         .is("archived_at", null)
         .order("canonical_name"),
       supabase
@@ -227,6 +227,7 @@ export function QuickLogForm({
           (version) => version.concept_id === linkedItem.id,
         );
         const role = {
+          meal: "consumed",
           skin_contact: "contacted",
           product_use: "used",
           topical_treatment: "applied",
@@ -240,7 +241,7 @@ export function QuickLogForm({
           concept_version_id: selectedVersion?.id || null,
           role,
           amount: amount ? Number(amount) : null,
-          unit: unit.trim() || null,
+          unit: unit.trim() || (type === "meal" && amount ? "serving" : null),
           body_area_code:
             type === "activity"
               ? activityProductAreas[linkedItem.id] || null
@@ -401,6 +402,9 @@ export function QuickLogForm({
               setSelectedConceptId("");
               setActivityConceptIds([]);
               setActivityProductAreas({});
+              setAmount("");
+              setUnit("");
+              setRoute("");
             }}
           >
             {types.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
@@ -512,11 +516,13 @@ export function QuickLogForm({
             )}
           </fieldset>
         )}
-        {["skin_contact", "product_use", "topical_treatment", "medication", "activity"]
+        {["meal", "skin_contact", "product_use", "topical_treatment", "medication", "activity"]
           .includes(type) && (
           <fieldset className="subcard">
             <legend>
-              {type === "medication"
+              {type === "meal"
+                ? "Saved meal or recipe"
+                : type === "medication"
                 ? "Saved medication"
                 : type === "topical_treatment"
                   ? "Saved treatment"
@@ -525,11 +531,16 @@ export function QuickLogForm({
                     : "Saved product"}
             </legend>
             <label>
-              {type === "activity" ? "Select every product used" : "Select an item"}
+              {type === "activity"
+                ? "Select every product used"
+                : type === "meal"
+                  ? "Select a saved meal"
+                  : "Select an item"}
               {type === "activity" ? (
                 <span className="choice-list">
                 {sortCatalogueItems(catalogueItems
-                    .filter((item) => item.concept_type !== "medication")
+                    .filter((item) =>
+                      item.concept_type === "product" || item.concept_type === "treatment")
                   ).map((item) => (
                       <span className="check-row" key={item.id}>
                         <input
@@ -559,7 +570,8 @@ export function QuickLogForm({
                         </span>
                       </span>
                     ))}
-                  {catalogueItems.filter((item) => item.concept_type !== "medication")
+                  {catalogueItems.filter((item) =>
+                    item.concept_type === "product" || item.concept_type === "treatment")
                     .length === 0 && (
                     <span className="evidence">No saved products yet.</span>
                   )}
@@ -572,12 +584,14 @@ export function QuickLogForm({
                   <option value="">None / describe it below</option>
                   {sortCatalogueItems(catalogueItems
                     .filter((item) => {
+                      if (type === "meal") return item.concept_type === "recipe";
                       if (type === "medication") return item.concept_type === "medication";
                       if (type === "topical_treatment") {
                         return item.concept_type === "treatment"
                           || item.attributes.category === "moisturiser";
                       }
-                      return item.concept_type !== "medication";
+                      return item.concept_type === "product"
+                        || item.concept_type === "treatment";
                     }))
                     .map((item) => (
                       <option value={item.id} key={item.id}>
@@ -612,11 +626,11 @@ export function QuickLogForm({
                 ))}
               </div>
             )}
-            {selectedConceptId && ["medication", "topical_treatment", "product_use"]
+            {selectedConceptId && ["meal", "medication", "topical_treatment", "product_use"]
               .includes(type) && (
               <div className="form-grid">
                 <label>
-                  Amount / dose
+                  {type === "meal" ? "Servings eaten" : "Amount / dose"}
                   <input
                     type="number"
                     min="0"
@@ -625,22 +639,26 @@ export function QuickLogForm({
                     onChange={(event) => setAmount(event.target.value)}
                   />
                 </label>
-                <label>
-                  Unit
-                  <input
-                    value={unit}
-                    onChange={(event) => setUnit(event.target.value)}
-                    placeholder="e.g. tablet, mg, pump, fingertip unit"
-                  />
-                </label>
-                <label>
-                  Route
-                  <input
-                    value={route}
-                    onChange={(event) => setRoute(event.target.value)}
-                    placeholder={type === "topical_treatment" ? "topical" : "e.g. oral"}
-                  />
-                </label>
+                {type !== "meal" && (
+                  <>
+                    <label>
+                      Unit
+                      <input
+                        value={unit}
+                        onChange={(event) => setUnit(event.target.value)}
+                        placeholder="e.g. tablet, mg, pump, fingertip unit"
+                      />
+                    </label>
+                    <label>
+                      Route
+                      <input
+                        value={route}
+                        onChange={(event) => setRoute(event.target.value)}
+                        placeholder={type === "topical_treatment" ? "topical" : "e.g. oral"}
+                      />
+                    </label>
+                  </>
+                )}
                 {type === "topical_treatment" && (
                   <label>
                     Applied to
@@ -656,9 +674,19 @@ export function QuickLogForm({
                 )}
               </div>
             )}
-            {catalogueItems.length === 0 && (
+            {type === "meal" && selectedConceptId && (
               <p className="evidence">
-                Add reusable products, treatments or medications under Saved items first.
+                This logs the current saved recipe version. Use Saved items to edit it or
+                create a variation without changing earlier meal logs.
+              </p>
+            )}
+            {(type === "meal"
+              ? catalogueItems.every((item) => item.concept_type !== "recipe")
+              : catalogueItems.length === 0) && (
+              <p className="evidence">
+                {type === "meal"
+                  ? "Add a reusable meal or recipe under Saved items first."
+                  : "Add reusable products, treatments or medications under Saved items first."}
               </p>
             )}
           </fieldset>

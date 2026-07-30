@@ -27,7 +27,7 @@ export function mergeIngredientNames(
 ): string[] {
   const merged: string[] = [];
   const seen = new Set<string>();
-  for (const name of [...extracted, ...existing]) {
+  for (const name of [...existing, ...extracted]) {
     const trimmed = name.trim();
     const normalized = trimmed.toLocaleLowerCase();
     if (!trimmed || seen.has(normalized)) continue;
@@ -55,4 +55,66 @@ export function catalogueReviewDefaults(
 
 export function isSameSuggestion(current: string, suggested: string | null | undefined): boolean {
   return current.trim().toLocaleLowerCase() === (suggested || "").trim().toLocaleLowerCase();
+}
+
+export interface StructuredIngredientInput {
+  name: string;
+  amount?: number | null;
+  unit?: string | null;
+}
+
+export function parseRecipeIngredientLines(raw: string): StructuredIngredientInput[] {
+  return raw
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [namePart, amountPart, unitPart] = line.split("|").map((part) => part.trim());
+      const parsedAmount = amountPart ? Number(amountPart) : Number.NaN;
+      return {
+        name: namePart,
+        ...(!Number.isNaN(parsedAmount) ? {amount: parsedAmount} : {}),
+        ...(unitPart ? {unit: unitPart} : {}),
+      };
+    })
+    .filter(({name}) => Boolean(name));
+}
+
+export function formatRecipeIngredientLine(
+  name: string,
+  amount: number | null,
+  unit: string | null,
+): string {
+  if (amount === null && !unit) return name;
+  return `${name} | ${amount ?? ""} | ${unit || ""}`.trimEnd();
+}
+
+export function mergeRecipeIngredientLines(
+  existingText: string,
+  extractedIngredients: Array<string | StructuredIngredientInput>,
+): string {
+  const existing = parseRecipeIngredientLines(existingText);
+  const seen = new Set(existing.map(({name}) => name.trim().toLocaleLowerCase()));
+  const merged = [...existing];
+
+  for (const extractedIngredient of extractedIngredients) {
+    const ingredient =
+      typeof extractedIngredient === "string"
+        ? {name: extractedIngredient}
+        : extractedIngredient;
+    const name = ingredient.name.trim();
+    const normalized = name.toLocaleLowerCase();
+    if (!name || seen.has(normalized)) continue;
+    seen.add(normalized);
+    merged.push({
+      name,
+      ...(ingredient.amount === undefined ? {} : {amount: ingredient.amount}),
+      ...(ingredient.unit ? {unit: ingredient.unit} : {}),
+    });
+  }
+
+  return merged
+    .map(({name, amount, unit}) =>
+      formatRecipeIngredientLine(name, amount ?? null, unit ?? null))
+    .join("\n");
 }

@@ -143,7 +143,14 @@ details textarea { margin-top: 10px; }
 .section-heading h2, .catalogue-item-heading h2 { margin-bottom: 0; }
 .catalogue-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .catalogue-item { display: flex; flex-direction: column; }
-.catalogue-item .text-button { margin-top: auto; align-self: start; }
+.catalogue-item-actions { margin-top: auto; align-items: center; }
+.catalogue-item-actions .text-button { align-self: center; }
+.recipe-preparation-notes {
+  padding: 10px 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
 .favorite-button {
   border: 0;
   background: transparent;
