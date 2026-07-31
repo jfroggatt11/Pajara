@@ -101,7 +101,13 @@ export default function App() {
         {view === "catalogue" && <Catalogue session={session} refreshKey={refreshKey} onChanged={refresh} />}
         {view === "review" && <ReviewQueue refreshKey={refreshKey} />}
         {view === "timeline" && <Timeline session={session} refreshKey={refreshKey} onChanged={refresh} />}
-        {view === "photos" && <PhotoCompare refreshKey={refreshKey} />}
+        {view === "photos" && (
+          <PhotoCompare
+            refreshKey={refreshKey}
+            bodyAreas={bodyAreas}
+            timezone={profile.timezone}
+          />
+        )}
         {view === "trends" && <Trends refreshKey={refreshKey} />}
         {view === "reports" && <Reports session={session} refreshKey={refreshKey} />}
         {view === "settings" && <Settings session={session} profile={profile} onProfile={setProfile} />}

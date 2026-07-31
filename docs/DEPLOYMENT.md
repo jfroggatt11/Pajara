@@ -158,8 +158,11 @@ On the intended phone:
 
 1. Sign in through the invited email.
 2. Accept the hosted-data disclosure and create a profile.
-3. Save a morning skin check with one photo.
-4. Confirm the Storage object is private.
+3. Save morning and evening skin checks with left/right palm and back photos.
+4. Confirm the Storage objects are private, then verify Photos can show:
+   - one exact area/view series over time without mixing left/right or palm/back;
+   - all photos from one selected day;
+   - the optional two-photo overlay within a matching series.
 5. Log a prepared meal:
    - save or select a recipe with its ingredient list, preparation method, and usual
      preparation-contact prompt;
@@ -204,8 +207,9 @@ ready for daily use.
 
 - Generated full exports include original media available at export time. Operational
   backups must still mirror Storage independently.
-- Photo comparison supports side-by-side review and an opacity overlay. Automatic
-  alignment and synchronized zoom remain later enhancements.
+- Photos support complete matching area/view series, selected-day galleries, and an
+  optional same-series opacity overlay. Automatic alignment, derived thumbnails, and
+  synchronized zoom remain later enhancements.
 - Saved meals and recipe variations are available. Recipe-image extraction is still
   transcription assistance and must be reviewed. Saved preparation/contact notes are
   only editable prompts; they do not establish what touched skin on a particular

@@ -421,11 +421,17 @@ immutable after release.
 5. Show pose, lighting, distance, blur, and exposure guidance.
 6. Save immediately; photo processing can continue asynchronously.
 
-Originals are never modified. Photo comparison supports side-by-side viewing and an
-opacity overlay, labels area/view, and initially pairs matching views where available.
-A four-slot hand preset captures left palm, left back, right palm, and right back.
-Derived thumbnails, automatic alignment, and synchronized zoom are later
-enhancements. No automated diagnosis or clinical image score is included.
+Originals are never modified. The Photos screen has two primary browsing modes:
+
+- every image in one exact body-area/view series, ordered over time;
+- every image captured on one selected local calendar day.
+
+Area and view remain part of the grouping key, so left palm, left back, right palm,
+and right back are not mixed. A two-photo opacity overlay remains an optional tool
+within a matching series rather than the main browsing workflow. A four-slot hand
+preset captures those four standard series. Derived thumbnails, automatic alignment,
+and synchronized zoom are later enhancements. No automated diagnosis or clinical
+image score is included.
 
 ### 8.2 Quick log
 
@@ -745,7 +751,9 @@ environments and are the next operational work.
 
 **M2.1 Trends/photo comparison**
 
-- symptom charts, completeness, overlays, side-by-side photos.
+- symptom charts and completeness;
+- same-area/view chronological photo galleries and selected-day photo galleries;
+- optional matching-series overlay and side-by-side inspection.
 
 **M2.2 Descriptive analysis/report**
 

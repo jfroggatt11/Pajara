@@ -1,21 +1,13 @@
 import {useState, type FormEvent} from "react";
 import type {Session} from "@supabase/supabase-js";
 import {uploadArtifact} from "../lib/artifacts";
+import {photoViews} from "../lib/photos";
 import {supabase} from "../lib/supabase";
 import type {BodyArea, Profile} from "../types";
 import {StatusMessage} from "./StatusMessage";
 
 const symptoms = ["redness", "itching", "dryness", "cracking", "swelling", "pain"] as const;
 const maxPhotos = 12;
-const photoViews = [
-  ["overview", "Overview"],
-  ["palm", "Palm / front"],
-  ["back", "Back of hand"],
-  ["side", "Side"],
-  ["close_up", "Close-up"],
-  ["other", "Other"],
-] as const;
-
 interface PhotoEntry {
   id: string;
   bodyAreaCode: string;
