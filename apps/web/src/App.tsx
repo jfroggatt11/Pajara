@@ -100,7 +100,7 @@ export default function App() {
         {view === "log" && <QuickLogForm session={session} profile={profile} bodyAreas={bodyAreas} onSaved={refresh} />}
         {view === "catalogue" && <Catalogue session={session} refreshKey={refreshKey} onChanged={refresh} />}
         {view === "review" && <ReviewQueue refreshKey={refreshKey} />}
-        {view === "timeline" && <Timeline session={session} refreshKey={refreshKey} onDeleted={refresh} />}
+        {view === "timeline" && <Timeline session={session} refreshKey={refreshKey} onChanged={refresh} />}
         {view === "photos" && <PhotoCompare refreshKey={refreshKey} />}
         {view === "trends" && <Trends refreshKey={refreshKey} />}
         {view === "reports" && <Reports session={session} refreshKey={refreshKey} />}

@@ -39,9 +39,11 @@ arguments, or the frontend.
 
    For an existing Pajara project, confirm that the catalogue migrations
    `202607290002_catalogue.sql`, `202607290003_safe_catalogue_review.sql`, and
-   `202607290004_editable_catalogue_recipes.sql` are listed before approving the push.
-   They add versioned saved items, preserve manual data during image review, and add
-   editable recipes/variations; they do not replace existing logs.
+   `202607290004_editable_catalogue_recipes.sql` are present. Also confirm that
+   `202607310001_save_meal_as_recipe.sql` is listed as pending before approving the push.
+   They add versioned saved items, preserve manual data during image review, add editable
+   recipes/variations, and transactionally convert a logged meal into a linked recipe;
+   they do not replace existing logs.
 
 5. In Authentication:
    - set the initial Site URL to the eventual Netlify production URL;
@@ -164,6 +166,8 @@ On the intended phone:
    - confirm or correct the method and actual contact for this occurrence;
    - choose body area, glove state, and glove material where applicable;
    - verify consumption and preparation/contact appear as linked events.
+   - for a meal that did not use a saved recipe, use **Save as a recipe**, review the
+     reusable fields, and confirm the timeline now shows the linked recipe;
 6. Add a saved cream or household product:
    - enter any known ingredients;
    - attach a front and ingredient-label photo;

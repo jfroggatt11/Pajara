@@ -3,6 +3,7 @@ import type {Session} from "@supabase/supabase-js";
 import {apiPost} from "../lib/api";
 import {supabase} from "../lib/supabase";
 import type {EventRecord, Observation} from "../types";
+import {SaveMealAsRecipe} from "./SaveMealAsRecipe";
 
 interface EventConceptLink {
   id: string;
@@ -15,18 +16,25 @@ interface EventConceptLink {
   concepts: {canonical_name: string; concept_type: string} | null;
 }
 
+interface EventRelationLink {
+  from_event_id: string;
+  to_event_id: string;
+  relation_type: string;
+}
+
 export function Timeline({
   session,
   refreshKey,
-  onDeleted,
+  onChanged,
 }: {
   session: Session;
   refreshKey: number;
-  onDeleted: () => void;
+  onChanged: () => void;
 }) {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
   const [conceptLinks, setConceptLinks] = useState<EventConceptLink[]>([]);
+  const [eventRelations, setEventRelations] = useState<EventRelationLink[]>([]);
 
   useEffect(() => {
     void Promise.all([
@@ -37,10 +45,16 @@ export function Timeline({
         .select("id,event_id,role,amount,unit,body_area_code,route,concepts(canonical_name,concept_type)")
         .order("created_at", {ascending: false})
         .limit(500),
-    ]).then(([eventResult, observationResult, conceptsResult]) => {
+      supabase
+        .from("event_relations")
+        .select("from_event_id,to_event_id,relation_type")
+        .eq("relation_type", "prepared_by")
+        .limit(500),
+    ]).then(([eventResult, observationResult, conceptsResult, relationsResult]) => {
       setEvents((eventResult.data || []) as EventRecord[]);
       setObservations((observationResult.data || []) as Observation[]);
       setConceptLinks((conceptsResult.data || []) as unknown as EventConceptLink[]);
+      setEventRelations((relationsResult.data || []) as EventRelationLink[]);
     });
   }, [refreshKey]);
 
@@ -51,7 +65,7 @@ export function Timeline({
       event_id: eventId,
       confirmation: "DELETE EVENT",
     });
-    onDeleted();
+    onChanged();
   }
 
   return (
@@ -64,6 +78,17 @@ export function Timeline({
         {events.map((event) => {
           const scores = observations.filter((item) => item.event_id === event.id);
           const linkedItems = conceptLinks.filter((item) => item.event_id === event.id);
+          const hasSavedRecipe = linkedItems.some(
+            (item) => item.role === "consumed" && item.concepts?.concept_type === "recipe",
+          );
+          const preparationRelation = eventRelations.find(
+            (relation) =>
+              relation.from_event_id === event.id
+              && relation.relation_type === "prepared_by",
+          );
+          const preparationEvent = events.find(
+            (candidate) => candidate.id === preparationRelation?.to_event_id,
+          );
           return (
             <article className="timeline-item" key={event.id}>
               <time>{new Date(event.occurred_start).toLocaleString()}</time>
@@ -93,6 +118,23 @@ export function Timeline({
                       </span>
                     ))}
                   </div>
+                )}
+                {event.type_code === "meal" && !hasSavedRecipe && (
+                  <SaveMealAsRecipe
+                    mealEventId={event.id}
+                    defaultName={event.label || ""}
+                    defaultMethod={
+                      typeof preparationEvent?.attributes.preparation_method === "string"
+                        ? preparationEvent.attributes.preparation_method
+                        : ""
+                    }
+                    defaultContact={
+                      typeof preparationEvent?.attributes.skin_contact_description === "string"
+                        ? preparationEvent.attributes.skin_contact_description
+                        : ""
+                    }
+                    onSaved={onChanged}
+                  />
                 )}
                 <button className="text-button small" onClick={() => void deleteEvent(event.id)}>Delete entry</button>
               </div>

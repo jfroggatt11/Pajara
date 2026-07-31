@@ -336,6 +336,10 @@ reviewed. Private reference/ingredient images, favourites, and archiving are sup
 Quick Log records the selected catalogue concept and its active immutable version.
 Saved preparation details prefill an editable preparation record; actual contact remains
 a distinct linked event rather than being inferred from the recipe ingredient list.
+After logging an unsaved meal, the user can review its reusable name, ingredient list,
+method, and contact prompt before saving it as a recipe. That transaction links the
+original meal to the recipe's exact initial version. The same action is available for
+eligible historical meal entries in the timeline.
 
 ### 6.5 AI proposals and revisions
 
@@ -734,6 +738,7 @@ environments and are the next operational work.
 - saved recipe/meal templates and immutable versions;
 - “log again” versus “create variation” using `derived_from`;
 - reusable preparation methods and contact prompts, corrected for each occurrence;
+- post-log and timeline conversion of an unsaved meal into a linked reusable recipe;
 - actual meal consumption linked separately from preparation/contact and cleanup.
 
 ### M2 — useful feedback and ownership

@@ -87,6 +87,7 @@ const assertions = [
   ["catalogue review function", await scalar("select count(*) from pg_proc where proname = 'review_catalogue_extraction'"), 1],
   ["catalogue create function", await scalar("select count(*) from pg_proc where proname = 'create_catalogue_item'"), 1],
   ["catalogue save function", await scalar("select count(*) from pg_proc where proname = 'save_catalogue_item'"), 1],
+  ["meal-to-recipe function", await scalar("select count(*) from pg_proc where proname = 'save_meal_event_as_recipe'"), 1],
 ];
 
 let failed = false;
@@ -102,6 +103,7 @@ for (const [label, actual, minimum] of assertions) {
 const userA = "00000000-0000-4000-8000-000000000001";
 const userB = "00000000-0000-4000-8000-000000000002";
 const userBConcept = "20000000-0000-4000-8000-000000000002";
+const userBMealEvent = "10000000-0000-4000-8000-000000000002";
 
 await database.exec(`
   insert into auth.users (id) values ('${userA}'), ('${userB}');
@@ -109,6 +111,12 @@ await database.exec(`
   values ('${userA}', 'User A'), ('${userB}', 'User B');
   insert into public.concepts (id, user_id, concept_type, canonical_name)
   values ('${userBConcept}', '${userB}', 'product', 'User B private product');
+  insert into public.events (
+    id, user_id, type_code, occurred_start, recorded_timezone, trust_status
+  ) values (
+    '${userBMealEvent}', '${userB}', 'meal',
+    '2026-07-29T07:00:00Z', 'Europe/Rome', 'trusted'
+  );
   grant usage on schema public, storage, auth to authenticated;
   grant select, insert, update, delete on all tables in schema public to authenticated;
   grant select, insert, update, delete on storage.objects to authenticated;
@@ -248,6 +256,73 @@ if (
   );
 }
 
+const reusableMealEvent = "10000000-0000-4000-8000-000000000003";
+await database.exec(`
+  insert into public.events (
+    id, user_id, type_code, occurred_start, recorded_timezone, trust_status
+  ) values (
+    '${reusableMealEvent}', '${userA}', 'meal',
+    '2026-07-29T12:00:00Z', 'Europe/Rome', 'trusted'
+  );
+
+  select public.save_meal_event_as_recipe(
+    '${reusableMealEvent}',
+    'Saved lentil soup',
+    '["Lentils","Carrot","Onion"]'::jsonb,
+    'Chop vegetables and simmer',
+    'Chop carrot and onion with bare hands'
+  );
+`);
+const savedMealRecipeLinks = await scalar(`
+  select count(*)
+  from public.event_concepts event_concept
+  join public.concepts recipe on recipe.id = event_concept.concept_id
+  join public.concept_versions version on version.id = event_concept.concept_version_id
+  where
+    event_concept.event_id = '${reusableMealEvent}'
+    and event_concept.user_id = '${userA}'
+    and event_concept.role = 'consumed'
+    and recipe.concept_type = 'recipe'
+    and recipe.canonical_name = 'Saved lentil soup'
+    and recipe.attributes ->> 'preparation_notes' = 'Chop vegetables and simmer'
+    and recipe.attributes ->> 'preparation_contact_notes'
+      = 'Chop carrot and onion with bare hands'
+    and version.effective_to is null
+`);
+const savedMealRecipeIngredients = await scalar(`
+  select count(*)
+  from public.compositions composition
+  join public.concepts recipe on recipe.id = composition.owner_concept_id
+  where
+    recipe.canonical_name = 'Saved lentil soup'
+    and recipe.user_id = '${userA}'
+`);
+if (savedMealRecipeLinks === 1 && savedMealRecipeIngredients === 3) {
+  console.log("PASS logged meal saved and linked as reusable recipe: 1");
+} else {
+  failed = true;
+  console.error(
+    "FAIL logged meal recipe save/link "
+      + `(${savedMealRecipeLinks}/${savedMealRecipeIngredients})`,
+  );
+}
+if (
+  !(await expectDenied(
+    "duplicate meal recipe conversion",
+    `
+      select public.save_meal_event_as_recipe(
+        '${reusableMealEvent}',
+        'Duplicate lentil soup',
+        '[]'::jsonb,
+        '',
+        ''
+      )
+    `,
+  ))
+) {
+  failed = true;
+}
+
 await database.exec(`
   insert into public.event_concepts (
     user_id,
@@ -351,9 +426,9 @@ const retainedHistoricalVersionLinks = await scalar(`
 if (
   editedItemCount === 1
   && editedItemVersions === 3
-  && recipeCount === 2
+  && recipeCount === 3
   && recipeVariationRelations === 1
-  && recipePreparationDetails === 2
+  && recipePreparationDetails === 3
   && retainedHistoricalVersionLinks === 1
 ) {
   console.log("PASS editable catalogue items and derived recipe variations: 1");
@@ -375,6 +450,23 @@ if (
         user_id, type_code, occurred_start, recorded_timezone, trust_status
       ) values (
         '${userB}', 'note', '2026-07-29T09:00:00Z', 'Europe/Rome', 'trusted'
+      )
+    `,
+  ))
+) {
+  failed = true;
+}
+
+if (
+  !(await expectDenied(
+    "cross-tenant meal recipe save",
+    `
+      select public.save_meal_event_as_recipe(
+        '${userBMealEvent}',
+        'Stolen recipe',
+        '[]'::jsonb,
+        '',
+        ''
       )
     `,
   ))

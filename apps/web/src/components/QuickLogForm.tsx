@@ -4,7 +4,10 @@ import {useVoiceRecorder} from "../hooks/useVoiceRecorder";
 import {apiPost} from "../lib/api";
 import {uploadArtifact} from "../lib/artifacts";
 import {sortCatalogueItems} from "../lib/catalogue";
-import {buildMealPreparationSourceText} from "../lib/mealPreparation";
+import {
+  buildMealPreparationSourceText,
+  suggestRecipeName,
+} from "../lib/mealPreparation";
 import {transcribeWithMoonshine} from "../lib/moonshine";
 import {
   buildVoiceTranscriptionProvenance,
@@ -12,6 +15,7 @@ import {
 } from "../lib/voiceTranscription";
 import {supabase} from "../lib/supabase";
 import type {BodyArea, CatalogueItem, ConceptVersion, Profile} from "../types";
+import {SaveMealAsRecipe} from "./SaveMealAsRecipe";
 import {StatusMessage} from "./StatusMessage";
 
 const types = [
@@ -33,6 +37,13 @@ const activityTypes = [
   ["swimming", "Swimming"],
   ["other", "Other activity"],
 ] as const;
+
+interface RecipeDraft {
+  mealEventId: string;
+  name: string;
+  method: string;
+  contact: string;
+}
 
 export function QuickLogForm({
   session,
@@ -69,6 +80,7 @@ export function QuickLogForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [recipeDraft, setRecipeDraft] = useState<RecipeDraft | null>(null);
   const [voiceStatus, setVoiceStatus] = useState<
     "idle" | "loading" | "transcribing" | "ready" | "error"
   >("idle");
@@ -233,6 +245,15 @@ export function QuickLogForm({
         .select()
         .single();
       if (eventError) throw eventError;
+      const recipeOffer =
+        type === "meal" && !selectedItem
+          ? {
+              mealEventId: mainEvent.id as string,
+              name: suggestRecipeName(text),
+              method: prepared ? preparationMethod : "",
+              contact: prepared ? handled : "",
+            }
+          : null;
 
       for (const linkedItem of selectedItems) {
         const selectedVersion = conceptVersions.find(
@@ -363,6 +384,7 @@ export function QuickLogForm({
               ? "Your original input is stored and visible in the timeline."
               : "Your original log is safely stored as trusted manual data.",
           );
+          if (recipeOffer) setRecipeDraft(recipeOffer);
           setText("");
           setPreparationMethod("");
           setHandled("");
@@ -383,6 +405,7 @@ export function QuickLogForm({
         }
       }
       setSuccess(shouldExtract ? "Saved. AI extraction is queued for review." : "Log saved.");
+      if (recipeOffer) setRecipeDraft(recipeOffer);
       setText("");
       setPreparationMethod("");
       setHandled("");
@@ -955,6 +978,21 @@ export function QuickLogForm({
           {busy ? "Saving…" : "Save log"}
         </button>
       </form>
+      {recipeDraft && (
+        <SaveMealAsRecipe
+          key={recipeDraft.mealEventId}
+          mealEventId={recipeDraft.mealEventId}
+          defaultName={recipeDraft.name}
+          defaultMethod={recipeDraft.method}
+          defaultContact={recipeDraft.contact}
+          initiallyOpen
+          onSaved={() => {
+            setRecipeDraft(null);
+            onSaved();
+          }}
+          onDismiss={() => setRecipeDraft(null)}
+        />
+      )}
     </section>
   );
 }

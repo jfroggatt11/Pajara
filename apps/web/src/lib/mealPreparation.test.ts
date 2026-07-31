@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {buildMealPreparationSourceText} from "./mealPreparation";
+import {buildMealPreparationSourceText, suggestRecipeName} from "./mealPreparation";
 
 describe("meal preparation extraction source", () => {
   it("labels method and actual contact separately", () => {
@@ -20,5 +20,14 @@ describe("meal preparation extraction source", () => {
     expect(
       buildMealPreparationSourceText({method: "", contact: "", notes: ""}),
     ).toBe("");
+  });
+
+  it("suggests a short editable recipe name from the first meal clause", () => {
+    expect(
+      suggestRecipeName(
+        "Made tomato pasta, chopped tomatoes with bare hands, then washed up.",
+      ),
+    ).toBe("tomato pasta");
+    expect(suggestRecipeName("")).toBe("");
   });
 });
