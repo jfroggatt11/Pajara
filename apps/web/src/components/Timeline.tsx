@@ -13,7 +13,10 @@ interface EventConceptLink {
   unit: string | null;
   body_area_code: string | null;
   route: string | null;
+  ingestion_method: string | null;
+  recipe_version_id: string | null;
   concepts: {canonical_name: string; concept_type: string} | null;
+  food_items: {canonical_name: string; food_kind: string} | null;
 }
 
 interface EventRelationLink {
@@ -42,7 +45,7 @@ export function Timeline({
       supabase.from("observations").select("*").order("observed_at", {ascending: false}).limit(500),
       supabase
         .from("event_concepts")
-        .select("id,event_id,role,amount,unit,body_area_code,route,concepts(canonical_name,concept_type)")
+        .select("id,event_id,role,amount,unit,body_area_code,route,ingestion_method,recipe_version_id,concepts(canonical_name,concept_type),food_items(canonical_name,food_kind)")
         .order("created_at", {ascending: false})
         .limit(500),
       supabase
@@ -79,7 +82,7 @@ export function Timeline({
           const scores = observations.filter((item) => item.event_id === event.id);
           const linkedItems = conceptLinks.filter((item) => item.event_id === event.id);
           const hasSavedRecipe = linkedItems.some(
-            (item) => item.role === "consumed" && item.concepts?.concept_type === "recipe",
+            (item) => item.role === "consumed" && Boolean(item.recipe_version_id),
           );
           const preparationRelation = eventRelations.find(
             (relation) =>
@@ -107,7 +110,9 @@ export function Timeline({
                   <div className="linked-items">
                     {linkedItems.map((item) => (
                       <span key={item.id}>
-                        {item.concepts?.canonical_name || "Saved item"} · {item.role}
+                        {item.food_items?.canonical_name
+                          || item.concepts?.canonical_name
+                          || "Saved item"} · {item.role}
                         {item.amount !== null
                           ? ` · ${item.amount}${item.unit ? ` ${item.unit}` : ""}`
                           : ""}
@@ -115,6 +120,9 @@ export function Timeline({
                           ? ` · ${item.body_area_code.replaceAll("_", " ")}`
                           : ""}
                         {item.route ? ` · ${item.route}` : ""}
+                        {item.ingestion_method
+                          ? ` · ${item.ingestion_method.replaceAll("_", " ")}`
+                          : ""}
                       </span>
                     ))}
                   </div>

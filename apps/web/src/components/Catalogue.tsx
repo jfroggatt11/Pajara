@@ -15,6 +15,7 @@ import type {
   CatalogueItemType,
   ConceptVersion,
 } from "../types";
+import {RecipeLibrary} from "./RecipeLibrary";
 import {StatusMessage} from "./StatusMessage";
 
 interface CompositionRow {
@@ -30,6 +31,8 @@ const itemTypeLabels: Record<CatalogueItemType, string> = {
   treatment: "Cream / topical treatment",
   recipe: "Meal / recipe",
 };
+
+const editableItemTypes: CatalogueItemType[] = ["product", "medication", "treatment"];
 
 export function Catalogue({
   session,
@@ -542,6 +545,7 @@ export function Catalogue({
         </div>
       </header>
       <StatusMessage error={error} success={success} />
+      <RecipeLibrary session={session} refreshKey={refreshKey} onChanged={onChanged} />
 
       {showCreate && (
         <form className="stack card create-item-card" onSubmit={submit} ref={editorRef}>
@@ -593,8 +597,8 @@ export function Catalogue({
               disabled={Boolean(editingItemId || derivedFromId)}
               onChange={(event) => setType(event.target.value as CatalogueItemType)}
             >
-              {Object.entries(itemTypeLabels).map(([value, label]) => (
-                <option value={value} key={value}>{label}</option>
+              {editableItemTypes.map((value) => (
+                <option value={value} key={value}>{itemTypeLabels[value]}</option>
               ))}
             </select>
           </label>
@@ -994,11 +998,11 @@ export function Catalogue({
         <div className="section-heading">
           <div><span className="eyebrow">Your catalogue</span><h2>Available for logging</h2></div>
         </div>
-        {items.length === 0 ? (
+        {items.filter(({concept_type}) => concept_type !== "recipe").length === 0 ? (
           <div className="empty"><h2>No saved items yet</h2><p>Add the first one above.</p></div>
         ) : (
           <div className="catalogue-grid">
-            {items.map((item) => {
+            {items.filter(({concept_type}) => concept_type !== "recipe").map((item) => {
               const version = currentVersionByConcept[item.id];
               const names = compositions
                 .filter(

@@ -3,6 +3,7 @@ import type {Session} from "@supabase/supabase-js";
 import {useVoiceRecorder} from "../hooks/useVoiceRecorder";
 import {apiPost} from "../lib/api";
 import {uploadArtifact} from "../lib/artifacts";
+import {localDatetimeToIso, localDatetimeValue} from "../lib/datetime";
 import {sortCatalogueItems} from "../lib/catalogue";
 import {
   buildMealPreparationSourceText,
@@ -14,7 +15,15 @@ import {
   moonshineConfig,
 } from "../lib/voiceTranscription";
 import {supabase} from "../lib/supabase";
-import type {BodyArea, CatalogueItem, ConceptVersion, Profile} from "../types";
+import type {
+  BodyArea,
+  CatalogueItem,
+  ConceptVersion,
+  Profile,
+  Recipe,
+  RecipeVersion,
+} from "../types";
+import {ActivityCaptureFlow} from "./ActivityCaptureFlow";
 import {SaveMealAsRecipe} from "./SaveMealAsRecipe";
 import {StatusMessage} from "./StatusMessage";
 
@@ -57,6 +66,7 @@ export function QuickLogForm({
   onSaved: () => void;
 }) {
   const [type, setType] = useState<string>("meal");
+  const [occurred, setOccurred] = useState(localDatetimeValue());
   const [text, setText] = useState("");
   const [prepared, setPrepared] = useState(false);
   const [preparationMethod, setPreparationMethod] = useState("");
@@ -69,9 +79,14 @@ export function QuickLogForm({
   const [activityProductAreas, setActivityProductAreas] = useState<Record<string, string>>({});
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
   const [conceptVersions, setConceptVersions] = useState<ConceptVersion[]>([]);
+  const [mealRecipes, setMealRecipes] = useState<Recipe[]>([]);
+  const [mealRecipeVersions, setMealRecipeVersions] = useState<RecipeVersion[]>([]);
   const [amount, setAmount] = useState("");
   const [unit, setUnit] = useState("");
   const [route, setRoute] = useState("");
+  const [ingestionMethod, setIngestionMethod] = useState<
+    "eaten" | "drank" | "swallowed" | "sublingual" | "inhaled" | "other"
+  >("eaten");
   const [activityType, setActivityType] = useState("shower");
   const [durationMinutes, setDurationMinutes] = useState("");
   const [waterTemperature, setWaterTemperature] = useState("unknown");
@@ -105,9 +120,17 @@ export function QuickLogForm({
         .select("*")
         .is("effective_to", null)
         .order("version_number", {ascending: false}),
-    ]).then(([itemsResult, versionsResult]) => {
+      supabase.from("recipes").select("*").is("archived_at", null).order("name"),
+      supabase
+        .from("recipe_versions")
+        .select("*")
+        .is("effective_to", null)
+        .order("version_number", {ascending: false}),
+    ]).then(([itemsResult, versionsResult, recipesResult, recipeVersionsResult]) => {
       setCatalogueItems((itemsResult.data || []) as CatalogueItem[]);
       setConceptVersions((versionsResult.data || []) as ConceptVersion[]);
+      setMealRecipes((recipesResult.data || []) as Recipe[]);
+      setMealRecipeVersions((recipeVersionsResult.data || []) as RecipeVersion[]);
     });
   }, []);
 
@@ -178,12 +201,20 @@ export function QuickLogForm({
     setError(null);
     setSuccess(null);
     try {
-      const now = new Date().toISOString();
+      const now = localDatetimeToIso(occurred);
       const selectedItems =
         type === "activity"
           ? catalogueItems.filter((item) => activityConceptIds.includes(item.id))
-          : catalogueItems.filter((item) => item.id === selectedConceptId);
+          : type === "meal"
+            ? []
+            : catalogueItems.filter((item) => item.id === selectedConceptId);
       const selectedItem = selectedItems[0];
+      const selectedRecipe = type === "meal"
+        ? mealRecipes.find((recipe) => recipe.id === selectedConceptId)
+        : undefined;
+      const selectedRecipeVersion = selectedRecipe
+        ? mealRecipeVersions.find((version) => version.recipe_id === selectedRecipe.id)
+        : undefined;
       const preparationSourceText =
         type === "meal" && prepared
           ? buildMealPreparationSourceText({
@@ -215,7 +246,7 @@ export function QuickLogForm({
           label:
             (type === "activity"
               ? activityTypes.find(([value]) => value === activityType)?.[1]
-              : selectedItem?.canonical_name || null),
+              : selectedRecipe?.name || selectedItem?.canonical_name || null),
           attributes: {
             original_text: text,
             prepared_by_user: type === "meal" ? prepared : undefined,
@@ -238,6 +269,9 @@ export function QuickLogForm({
                 ? directContact
                 : undefined,
             voice_transcription: voiceTranscription,
+            ingestion_method: ["meal", "medication"].includes(type)
+              ? ingestionMethod
+              : undefined,
           },
           trust_status: shouldExtract && !(type === "meal" && prepared) ? "draft" : "trusted",
           source_method: voice.audioFile ? "voice" : text.trim() ? "text" : "manual",
@@ -246,7 +280,7 @@ export function QuickLogForm({
         .single();
       if (eventError) throw eventError;
       const recipeOffer =
-        type === "meal" && !selectedItem
+        type === "meal" && !selectedItem && !selectedRecipe
           ? {
               mealEventId: mainEvent.id as string,
               name: suggestRecipeName(text),
@@ -291,6 +325,7 @@ export function QuickLogForm({
               : null,
           direct_contact:
             type === "activity" && activityType === "washing_up" ? directContact : null,
+          ingestion_method: type === "medication" ? ingestionMethod : null,
           confidence: 1,
           review_state: "accepted",
           provenance: {
@@ -308,6 +343,35 @@ export function QuickLogForm({
         if (recentError) throw recentError;
       }
 
+      if (selectedRecipe && selectedRecipeVersion) {
+        const {error: recipeLinkError} = await supabase.from("event_concepts").insert({
+          user_id: session.user.id,
+          event_id: mainEvent.id,
+          concept_id: null,
+          food_item_id: selectedRecipe.output_food_item_id,
+          recipe_version_id: selectedRecipeVersion.id,
+          role: "consumed",
+          route: ingestionMethod === "eaten" || ingestionMethod === "drank"
+            || ingestionMethod === "swallowed" ? "oral" : ingestionMethod,
+          ingestion_method: ingestionMethod,
+          confidence: 1,
+          review_state: "accepted",
+          provenance: {
+            method: "manual_recipe_selection",
+            recipe_id: selectedRecipe.id,
+            recipe_version: selectedRecipeVersion.version_number,
+          },
+        });
+        if (recipeLinkError) throw recipeLinkError;
+        const {error: recipeRecentError} = await supabase
+          .from("recipes")
+          .update({
+            attributes: {...selectedRecipe.attributes, last_used_at: now},
+          })
+          .eq("id", selectedRecipe.id);
+        if (recipeRecentError) throw recipeRecentError;
+      }
+
       let extractionTarget = mainEvent.id as string;
       if (type === "meal" && prepared) {
         const {data: prepEvent, error: prepError} = await supabase
@@ -318,9 +382,11 @@ export function QuickLogForm({
             type_code: "meal_preparation",
             occurred_start: now,
             recorded_timezone: profile.timezone,
-            label: selectedItem
-              ? `${selectedItem.canonical_name} preparation`
-              : "Meal preparation",
+            label: selectedRecipe
+              ? `${selectedRecipe.name} preparation`
+              : selectedItem
+                ? `${selectedItem.canonical_name} preparation`
+                : "Meal preparation",
             attributes: {
               original_text: preparationSourceText,
               prepared_by_user: true,
@@ -346,6 +412,35 @@ export function QuickLogForm({
           attributes: {},
         });
         if (relationError) throw relationError;
+        if (selectedRecipe && selectedRecipeVersion) {
+          const {error: preparedLinkError} = await supabase.from("event_concepts").insert({
+            user_id: session.user.id,
+            event_id: prepEvent.id,
+            food_item_id: selectedRecipe.output_food_item_id,
+            recipe_version_id: selectedRecipeVersion.id,
+            role: "prepared",
+            confidence: 1,
+            review_state: "accepted",
+            provenance: {
+              method: "manual_recipe_preparation_confirmation",
+              recipe_id: selectedRecipe.id,
+              recipe_version: selectedRecipeVersion.version_number,
+            },
+          });
+          if (preparedLinkError) throw preparedLinkError;
+          const {error: batchError} = await supabase.from("food_batches").insert({
+            user_id: session.user.id,
+            food_item_id: selectedRecipe.output_food_item_id,
+            recipe_version_id: selectedRecipeVersion.id,
+            produced_by_event_id: prepEvent.id,
+            amount: selectedRecipeVersion.yield_amount,
+            remaining_amount: null,
+            unit: selectedRecipeVersion.yield_unit,
+            prepared_at: now,
+            attributes: {availability: "unknown", source_method: "manual"},
+          });
+          if (batchError) throw batchError;
+        }
         extractionTarget = prepEvent.id as string;
       }
 
@@ -418,6 +513,7 @@ export function QuickLogForm({
       setAmount("");
       setUnit("");
       setRoute("");
+      setIngestionMethod("eaten");
       setDurationMinutes("");
       voice.clear();
       setVoiceStatus("idle");
@@ -427,6 +523,7 @@ export function QuickLogForm({
       setVoiceError(null);
       setUseBackendFallback(false);
       setTextBeforeVoice("");
+      setOccurred(localDatetimeValue());
       onSaved();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the log.");
@@ -439,9 +536,30 @@ export function QuickLogForm({
     <section className="page">
       <header className="page-header">
         <div><span className="eyebrow">Fast capture</span><h1>Quick log</h1></div>
-        <p>Save first. Structure manually or review an AI proposal afterward.</p>
+        <p>Start with a photo or voice note, review the closest matches, then confirm exactly what happened.</p>
       </header>
+      <ActivityCaptureFlow
+        session={session}
+        profile={profile}
+        bodyAreas={bodyAreas}
+        onSaved={onSaved}
+      />
+      <div className="manual-log-divider"><span>or use the detailed manual form</span></div>
       <form className="stack card" onSubmit={submit}>
+        <div className="form-grid activity-time-row">
+          <label>
+            When did it happen?
+            <input
+              type="datetime-local"
+              value={occurred}
+              onChange={(event) => setOccurred(event.target.value)}
+              required
+            />
+          </label>
+          <button type="button" className="secondary small" onClick={() => setOccurred(localDatetimeValue())}>
+            Set to now
+          </button>
+        </div>
         <label>
           What are you logging?
           <select
@@ -457,6 +575,7 @@ export function QuickLogForm({
               setAmount("");
               setUnit("");
               setRoute("");
+              setIngestionMethod(event.target.value === "medication" ? "swallowed" : "eaten");
             }}
           >
             {types.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
@@ -634,17 +753,22 @@ export function QuickLogForm({
                   onChange={(event) => {
                     const nextId = event.target.value;
                     const selected = catalogueItems.find((item) => item.id === nextId);
+                    const selectedRecipe = mealRecipes.find((recipe) => recipe.id === nextId);
+                    const selectedVersion = mealRecipeVersions.find(
+                      (version) => version.recipe_id === selectedRecipe?.id,
+                    );
                     setSelectedConceptId(nextId);
                     if (type === "meal") {
-                      setPreparationMethod(selected?.attributes.preparation_notes || "");
-                      setHandled(selected?.attributes.preparation_contact_notes || "");
+                      setPreparationMethod(selectedVersion?.instructions || "");
+                      setHandled("");
                     }
                   }}
                 >
                   <option value="">None / describe it below</option>
-                  {sortCatalogueItems(catalogueItems
+                  {type === "meal" ? mealRecipes.map((recipe) => (
+                    <option value={recipe.id} key={recipe.id}>{recipe.name}</option>
+                  )) : sortCatalogueItems(catalogueItems
                     .filter((item) => {
-                      if (type === "meal") return item.concept_type === "recipe";
                       if (type === "medication") return item.concept_type === "medication";
                       if (type === "topical_treatment") {
                         return item.concept_type === "treatment"
@@ -715,6 +839,19 @@ export function QuickLogForm({
                     placeholder={type === "topical_treatment" ? "topical" : "e.g. oral"}
                   />
                 </label>
+                {type === "medication" && (
+                  <label>
+                    Ingestion method
+                    <select value={ingestionMethod} onChange={(event) => setIngestionMethod(
+                      event.target.value as typeof ingestionMethod,
+                    )}>
+                      <option value="swallowed">Swallowed</option>
+                      <option value="sublingual">Under the tongue</option>
+                      <option value="inhaled">Inhaled</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </label>
+                )}
                 {type === "topical_treatment" && (
                   <label>
                     Applied to
@@ -732,12 +869,12 @@ export function QuickLogForm({
             )}
             {type === "meal" && selectedConceptId && (
               <div className="stack compact-recipe-summary">
-                {catalogueItems.find((item) => item.id === selectedConceptId)
-                  ?.attributes.preparation_notes && (
+                {mealRecipeVersions.find((version) =>
+                  version.recipe_id === selectedConceptId)?.instructions && (
                   <p className="evidence">
                     <strong>Saved method:</strong>{" "}
-                    {catalogueItems.find((item) => item.id === selectedConceptId)
-                      ?.attributes.preparation_notes}
+                    {mealRecipeVersions.find((version) =>
+                      version.recipe_id === selectedConceptId)?.instructions}
                   </p>
                 )}
                 <p className="evidence">
@@ -747,7 +884,7 @@ export function QuickLogForm({
               </div>
             )}
             {(type === "meal"
-              ? catalogueItems.every((item) => item.concept_type !== "recipe")
+              ? mealRecipes.length === 0
               : catalogueItems.length === 0) && (
               <p className="evidence">
                 {type === "meal"
@@ -756,6 +893,19 @@ export function QuickLogForm({
               </p>
             )}
           </fieldset>
+        )}
+        {type === "meal" && (
+          <label>
+            How was it ingested?
+            <select value={ingestionMethod} onChange={(event) => setIngestionMethod(
+              event.target.value as typeof ingestionMethod,
+            )}>
+              <option value="eaten">Eaten</option>
+              <option value="drank">Drunk</option>
+              <option value="swallowed">Swallowed</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
         )}
         <label>
           {selectedConceptId || activityConceptIds.length > 0 || type === "activity"
@@ -887,14 +1037,11 @@ export function QuickLogForm({
                   const nextPrepared = event.target.checked;
                   setPrepared(nextPrepared);
                   if (nextPrepared && selectedConceptId) {
-                    const selected = catalogueItems.find(
-                      (item) => item.id === selectedConceptId,
+                    const selectedVersion = mealRecipeVersions.find(
+                      (version) => version.recipe_id === selectedConceptId,
                     );
                     if (!preparationMethod) {
-                      setPreparationMethod(selected?.attributes.preparation_notes || "");
-                    }
-                    if (!handled) {
-                      setHandled(selected?.attributes.preparation_contact_notes || "");
+                      setPreparationMethod(selectedVersion?.instructions || "");
                     }
                   }
                 }}

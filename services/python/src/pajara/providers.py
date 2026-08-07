@@ -3,13 +3,16 @@
 import base64
 import re
 from abc import ABC, abstractmethod
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from openai import OpenAI
 from openai.types.responses import ResponseInputParam
 
 from pajara.config import Settings
 from pajara.domain import (
+    ActivityCaptureProposal,
+    CaptureIngredientProposal,
+    CaptureProposalBundle,
     ExtractionProposal,
     ProductLabelProposal,
     ProposedAssertion,
@@ -36,6 +39,17 @@ treatment. Use confidence to describe transcription certainty only. Put unreadab
 ambiguous areas in warnings.
 """.strip()
 
+CAPTURE_INSTRUCTIONS = """
+Convert a personal activity photo or transcript into reviewable activity proposals.
+Never diagnose, infer a medical cause, or silently assert uncertain facts. A single
+capture may describe several distinct activities, such as exercise, showering and
+applying a cream. Keep food ingestion and food-preparation skin contact separate.
+For a meal photograph, ingredient names are hypotheses: distinguish visible evidence
+from ingredients suggested by the supplied personal recipe context. Do not claim a
+personal-pattern ingredient is visible. Return only structured proposals for human
+confirmation.
+""".strip()
+
 
 class ExtractionProvider(ABC):
     name: str
@@ -54,6 +68,16 @@ class ExtractionProvider(ABC):
 
     def extract_product_label(self, media_type: str, content: bytes) -> ProductLabelProposal:
         raise RuntimeError("Image label extraction is not supported by this provider")
+
+    def extract_capture(
+        self,
+        source_type: str,
+        source_text: str,
+        media_type: str | None,
+        content: bytes | None,
+        knowledge_context: list[dict[str, Any]] | None = None,
+    ) -> CaptureProposalBundle:
+        raise RuntimeError("Activity capture extraction is not supported by this provider")
 
 
 class FakeExtractionProvider(ExtractionProvider):
@@ -108,6 +132,85 @@ class FakeExtractionProvider(ExtractionProvider):
             ]
         )
 
+    def extract_capture(
+        self,
+        source_type: str,
+        source_text: str,
+        media_type: str | None,
+        content: bytes | None,
+        knowledge_context: list[dict[str, Any]] | None = None,
+    ) -> CaptureProposalBundle:
+        del media_type, content
+        normalized = " ".join(source_text.split())
+        if source_type == "photo":
+            context = knowledge_context or []
+            if context:
+                first = context[0]
+                ingredients = [
+                    CaptureIngredientProposal(
+                        name=str(name),
+                        confidence=0.5,
+                        evidence="Suggested by the leading saved dish.",
+                        basis=["matched_recipe"],
+                    )
+                    for name in first.get("ingredients", [])
+                ]
+                return CaptureProposalBundle(
+                    activities=[
+                        ActivityCaptureProposal(
+                            activity_type="meal",
+                            label=str(first.get("name") or "Photographed meal"),
+                            ingredients=ingredients,
+                            warnings=["Development mode cannot inspect the photograph."],
+                        )
+                    ]
+                )
+            return CaptureProposalBundle(
+                activities=[
+                    ActivityCaptureProposal(
+                        activity_type="meal",
+                        label="Photographed meal",
+                        warnings=[
+                            "Development mode cannot inspect the photograph; choose a saved dish "
+                            "or enter one manually."
+                        ],
+                    )
+                ]
+            )
+
+        parts = [
+            part.strip()
+            for part in re.split(r"(?:\bthen\b|[.;]|\band\s+then\b)", normalized, flags=re.I)
+            if part.strip()
+        ] or [normalized or "Manual activity"]
+        activities: list[ActivityCaptureProposal] = []
+        for part in parts[:12]:
+            lowered = part.lower()
+            activity_type: Literal[
+                "meal",
+                "meal_preparation",
+                "skin_contact",
+                "product_use",
+                "topical_treatment",
+                "medication",
+                "activity",
+                "note",
+            ]
+            if re.search(r"\b(ate|meal|breakfast|lunch|dinner|food|drank|drink)\b", lowered):
+                activity_type = "meal"
+            elif re.search(r"\b(cream|ointment|lotion|moistur)\w*\b", lowered):
+                activity_type = "topical_treatment"
+            elif re.search(r"\b(medicine|medication|tablet|pill|dose)\b", lowered):
+                activity_type = "medication"
+            elif re.search(r"\b(shower|bath|ran|run|running|exercise|swam|swim)\b", lowered):
+                activity_type = "activity"
+            else:
+                activity_type = "note"
+            activities.append(
+                ActivityCaptureProposal(activity_type=activity_type, label=part[:240])
+            )
+        return CaptureProposalBundle(activities=activities)
+
 
 class OpenAIExtractionProvider(ExtractionProvider):
     name = "openai"
@@ -118,6 +221,7 @@ class OpenAIExtractionProvider(ExtractionProvider):
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_extraction_model
         self._product_label_model = settings.openai_product_label_model
+        self.capture_model = settings.openai_capture_model
         self.transcription_model = settings.openai_transcription_model
 
     @property
@@ -173,6 +277,55 @@ class OpenAIExtractionProvider(ExtractionProvider):
         )
         if response.output_parsed is None:
             raise RuntimeError("The label extraction model returned no validated proposal")
+        return response.output_parsed
+
+    def extract_capture(
+        self,
+        source_type: str,
+        source_text: str,
+        media_type: str | None,
+        content: bytes | None,
+        knowledge_context: list[dict[str, Any]] | None = None,
+    ) -> CaptureProposalBundle:
+        context_text = (
+            "No personal recipe context is supplied. Make a generic guess only."
+            if knowledge_context is None
+            else (
+                "Only use the following private, retrieved recipe candidates as uncertain "
+                f"personal context:\n{knowledge_context}"
+            )
+        )
+        content_parts: list[dict[str, Any]] = [
+            {
+                "type": "input_text",
+                "text": (
+                    f"Capture source: {source_type}\n"
+                    f"User text/transcript: {source_text or '(none)'}"
+                    f"\n{context_text}"
+                ),
+            }
+        ]
+        if content is not None and media_type is not None:
+            encoded = base64.b64encode(content).decode("ascii")
+            content_parts.append(
+                {
+                    "type": "input_image",
+                    "image_url": f"data:{media_type};base64,{encoded}",
+                    "detail": "high",
+                }
+            )
+        request_input = cast(
+            "ResponseInputParam",
+            [{"role": "user", "content": content_parts}],
+        )
+        response = self.client.responses.parse(
+            model=self.capture_model,
+            instructions=CAPTURE_INSTRUCTIONS,
+            input=request_input,
+            text_format=CaptureProposalBundle,
+        )
+        if response.output_parsed is None:
+            raise RuntimeError("The capture model returned no validated proposal")
         return response.output_parsed
 
 

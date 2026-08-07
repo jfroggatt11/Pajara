@@ -279,6 +279,12 @@ All buckets are private. Object paths start with the authenticated user's UUID.
 
 ### 6.4 Ingredients, products, ingestion, and contact
 
+> The food and activity portion of this section has been superseded by the implemented
+> [activity and food ontology](ACTIVITY_FOOD_ONTOLOGY.md). The legacy `concepts` and
+> `compositions` rows remain for compatible products/medications and historical recipe
+> links; new meals use `food_items`, `recipes`, `recipe_versions`, `recipe_components`,
+> `capture_sessions`, and the extended `event_concepts` edges described there.
+
 #### `concepts`, `concept_aliases`, `concept_relations`
 
 Represent canonical ingredients, products, medications, treatments, recipes,

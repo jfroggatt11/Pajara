@@ -77,6 +77,22 @@ async function storeArtifact(
   return artifact.id as string;
 }
 
+export async function uploadCaptureArtifact(
+  session: Session,
+  captureId: string,
+  file: File,
+  sourceType: "photo" | "voice",
+  artifactKind?: string,
+): Promise<string> {
+  return storeArtifact(
+    session,
+    captureId,
+    file,
+    sourceType === "photo" ? "input-originals" : "voice-originals",
+    artifactKind || (sourceType === "photo" ? "meal_photo" : "voice_note"),
+  );
+}
+
 export async function uploadArtifact(
   session: Session,
   eventId: string,

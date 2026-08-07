@@ -48,6 +48,8 @@ p { line-height: 1.55; }
 .card.boundary { background: #fff4e9; border-color: #e8c9aa; }
 .stack { display: grid; gap: 18px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.activity-time-row { align-items: end; }
+.activity-time-row > button { justify-self: start; margin-bottom: 1px; }
 label { display: grid; gap: 7px; color: #304743; font-weight: 600; font-size: .9rem; }
 input, select, textarea { width: 100%; border: 1px solid #c9c8bf; border-radius: 12px; padding: 12px 13px; color: var(--ink); background: white; }
 input:focus, select:focus, textarea:focus, button:focus-visible { outline: 3px solid #f2b88099; outline-offset: 2px; }
@@ -285,6 +287,103 @@ details textarea { margin-top: 10px; }
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
+.smart-capture { overflow: hidden; }
+.smart-capture h3 { margin: 0; }
+.capture-hero { min-height: 190px; align-content: center; text-align: center; }
+.capture-preview, .capture-review-photo {
+  display: block;
+  width: 100%;
+  max-height: 440px;
+  margin-top: 8px;
+  border-radius: 14px;
+  background: #e8e7df;
+  object-fit: contain;
+}
+.capture-review-photo { margin: 0; }
+.voice-actions, .choice-actions, .wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.wizard-actions { justify-content: space-between; }
+.status-pill {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #e5f0eb;
+  color: #29554c;
+  font-size: .76rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+.proposal-card { background: #f8f6ef; }
+.candidate-card {
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  color: var(--ink);
+  text-align: left;
+}
+.candidate-card.top { padding: 18px; border-color: #9db9af; }
+.candidate-card.selected { border-color: var(--forest); box-shadow: 0 0 0 2px #153e3a24; }
+.candidate-card span, .candidate-card small { color: var(--muted); }
+.candidate-list { display: grid; gap: 9px; margin-top: 12px; }
+.choice-actions .active { background: #e4eee9; border-color: var(--forest); }
+.ingredient-check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.contact-picker { padding: 16px; border-radius: 14px; background: #eef5f1; }
+.capture-complete { padding: 34px 12px; text-align: center; }
+.complete-mark {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  background: var(--forest);
+  color: white;
+  font-size: 1.7rem;
+}
+.manual-log-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 24px 0;
+  color: var(--muted);
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.manual-log-divider::before, .manual-log-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+.recipe-library { padding: 26px 0 38px; border-bottom: 1px solid var(--line); }
+.recipe-editor { margin: 18px 0 24px; }
+.recipe-components-editor { gap: 12px; }
+.recipe-component-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(180px, 2fr) .7fr .8fr auto auto;
+  gap: 10px;
+  align-items: end;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.recipe-component-summary { display: grid; gap: 6px; margin-bottom: 14px; }
+.recipe-component-summary span {
+  width: fit-content;
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: #eef1eb;
+  color: #29554c;
+  font-size: .8rem;
+}
 
 @media (max-width: 800px) {
   .app-shell { display: block; }
@@ -300,6 +399,8 @@ details textarea { margin-top: 10px; }
   .notice-grid, .metric-grid, .catalogue-grid { grid-template-columns: 1fr; }
   .form-grid, .score-grid { grid-template-columns: 1fr; }
   .activity-product-areas { grid-template-columns: 1fr; }
+  .ingredient-check-grid { grid-template-columns: 1fr; }
+  .recipe-component-row { grid-template-columns: 1fr; }
   .photo-grid { grid-template-columns: 1fr; }
   .timeline-item { grid-template-columns: 1fr; gap: 6px; }
   .timeline-item time { text-align: left; padding: 0 8px; }

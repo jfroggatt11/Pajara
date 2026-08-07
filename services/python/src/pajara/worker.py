@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -95,6 +96,20 @@ class Worker:
                         )
                     except Exception:
                         logger.exception("Could not mark catalogue extraction as failed")
+            if not retry and job.get("job_type") == "capture_extraction":
+                capture_id = job.get("payload", {}).get("capture_session_id")
+                if capture_id:
+                    try:
+                        await self.client.update(
+                            "capture_sessions",
+                            f"id=eq.{capture_id}&user_id=eq.{job['user_id']}",
+                            {
+                                "status": "failed",
+                                "error": f"{type(exc).__name__}: processing failed",
+                            },
+                        )
+                    except Exception:
+                        logger.exception("Could not mark capture extraction as failed")
             await self.client.update(
                 "jobs",
                 f"id=eq.{job['id']}",
@@ -113,6 +128,7 @@ class Worker:
         handlers = {
             "extraction": self._extract,
             "catalogue_extraction": self._extract_catalogue,
+            "capture_extraction": self._extract_capture,
             "analysis": self._analyze,
             "report": self._report,
             "export": self._export,
@@ -122,6 +138,343 @@ class Worker:
         if handler is None:
             raise ValueError(f"Unsupported job type: {job['job_type']}")
         return await handler(job)
+
+    @staticmethod
+    def _match_score(query: str, candidate: str) -> float:
+        def tokens(value: str) -> set[str]:
+            return {token for token in re.findall(r"[a-z0-9]+", value.lower()) if len(token) > 1}
+
+        query_tokens = tokens(query)
+        candidate_tokens = tokens(candidate)
+        if not query_tokens or not candidate_tokens:
+            return 0.0
+        if query.strip().lower() == candidate.strip().lower():
+            return 1.0
+        return len(query_tokens & candidate_tokens) / len(query_tokens | candidate_tokens)
+
+    async def _recipe_context(self, user_id: str) -> list[dict[str, Any]]:
+        recipes = await self.client.select(
+            "recipes",
+            query=f"select=*&user_id=eq.{user_id}&archived_at=is.null&order=updated_at.desc",
+        )
+        if not recipes:
+            return []
+        recipe_ids = ",".join(str(recipe["id"]) for recipe in recipes)
+        versions = await self.client.select(
+            "recipe_versions",
+            query=(f"select=*&recipe_id=in.({recipe_ids})&order=version_number.desc"),
+        )
+        if not versions:
+            return []
+        version_by_recipe = {
+            str(version["recipe_id"]): version
+            for version in versions
+            if version.get("effective_to") is None
+        }
+        version_ids = ",".join(str(version["id"]) for version in versions)
+        components = await self.client.select(
+            "recipe_components",
+            query=(
+                "select=*&recipe_version_id=in.("
+                f"{version_ids})&review_state=in.(accepted,corrected)&order=component_order.asc"
+            ),
+        )
+        food_ids = sorted({str(row["component_food_item_id"]) for row in components})
+        foods: list[dict[str, Any]] = []
+        if food_ids:
+            foods = await self.client.select(
+                "food_items",
+                query=f"select=id,canonical_name&id=in.({','.join(food_ids)})",
+            )
+        food_names = {str(food["id"]): str(food["canonical_name"]) for food in foods}
+        components_by_version: dict[str, list[dict[str, Any]]] = {}
+        for row in components:
+            components_by_version.setdefault(str(row["recipe_version_id"]), []).append(row)
+
+        def leaf_items(version_id: str, path: frozenset[str] = frozenset()) -> list[dict[str, str]]:
+            if version_id in path or len(path) >= 32:
+                return []
+            leaves: list[dict[str, str]] = []
+            for component in components_by_version.get(version_id, []):
+                nested_version_id = component.get("source_recipe_version_id")
+                if nested_version_id:
+                    leaves.extend(leaf_items(str(nested_version_id), path | {version_id}))
+                    continue
+                food_id = str(component["component_food_item_id"])
+                name = food_names.get(food_id)
+                if name:
+                    leaves.append({"id": food_id, "name": name})
+            return leaves
+
+        context: list[dict[str, Any]] = []
+        for recipe in recipes:
+            version = version_by_recipe.get(str(recipe["id"]))
+            if not version:
+                continue
+            leaves = leaf_items(str(version["id"]))
+            deduplicated_leaves = list({leaf["id"]: leaf for leaf in leaves}.values())
+            context.append(
+                {
+                    "recipe_id": recipe["id"],
+                    "recipe_version_id": version["id"],
+                    "recipe_version_number": version["version_number"],
+                    "output_food_item_id": recipe["output_food_item_id"],
+                    "name": recipe["name"],
+                    "ingredients": [leaf["name"] for leaf in deduplicated_leaves],
+                    "ingredient_items": deduplicated_leaves,
+                    "instructions": version.get("instructions") or "",
+                    "last_used_at": recipe.get("attributes", {}).get("last_used_at"),
+                }
+            )
+        return context
+
+    async def _concept_context(self, user_id: str) -> list[dict[str, Any]]:
+        concepts = await self.client.select(
+            "concepts",
+            query=(
+                "select=id,concept_type,canonical_name,attributes&"
+                f"user_id=eq.{user_id}&archived_at=is.null&"
+                "concept_type=in.(product,medication,treatment,activity)&order=updated_at.desc"
+            ),
+        )
+        if not concepts:
+            return []
+        concept_ids = ",".join(str(concept["id"]) for concept in concepts)
+        versions = await self.client.select(
+            "concept_versions",
+            query=(
+                "select=id,concept_id,version_number&effective_to=is.null&concept_id=in.("
+                f"{concept_ids})&order=version_number.desc"
+            ),
+        )
+        version_by_concept = {str(version["concept_id"]): version for version in versions}
+        return [
+            {
+                "concept_id": concept["id"],
+                "concept_version_id": version_by_concept.get(str(concept["id"]), {}).get("id"),
+                "concept_type": concept["concept_type"],
+                "name": concept["canonical_name"],
+                "attributes": concept.get("attributes", {}),
+            }
+            for concept in concepts
+        ]
+
+    @staticmethod
+    def _candidate_concept_types(activity_type: str) -> set[str]:
+        return {
+            "skin_contact": {"product", "treatment"},
+            "product_use": {"product", "treatment"},
+            "topical_treatment": {"treatment", "product"},
+            "medication": {"medication"},
+            "activity": {"activity"},
+        }.get(activity_type, set())
+
+    async def _extract_capture(self, job: dict[str, Any]) -> dict[str, Any]:
+        if job["payload"].get("mode", "activity") == "food_label":
+            return await self._extract_food_label_capture(job)
+
+        capture_id = job["payload"]["capture_session_id"]
+        rows = await self.client.select(
+            "capture_sessions", query=f"select=*&id=eq.{capture_id}&limit=1"
+        )
+        if not rows:
+            raise ValueError("Capture session does not exist")
+        capture = rows[0]
+        await self.client.update(
+            "capture_sessions",
+            f"id=eq.{capture_id}",
+            {
+                "status": "processing",
+                "provider": self.provider.name,
+                "model": getattr(self.provider, "capture_model", self.provider.model),
+                "prompt_version": "activity-capture-v1",
+            },
+        )
+
+        artifact: dict[str, Any] | None = None
+        content: bytes | None = None
+        if capture.get("artifact_id"):
+            artifacts = await self.client.select(
+                "artifacts", query=f"select=*&id=eq.{capture['artifact_id']}&limit=1"
+            )
+            if not artifacts:
+                raise ValueError("Capture artifact does not exist")
+            artifact = artifacts[0]
+            content = await self.client.download(artifact["bucket"], artifact["object_path"])
+
+        source_text = str(capture.get("transcript") or capture.get("original_text") or "").strip()
+        if (
+            capture["source_type"] == "voice"
+            and not source_text
+            and artifact
+            and content is not None
+        ):
+            source_text = (
+                await asyncio.to_thread(
+                    self.provider.transcribe,
+                    artifact.get("original_filename") or "voice-note",
+                    artifact["media_type"],
+                    content,
+                )
+            ).strip()
+            await self.client.update(
+                "capture_sessions", f"id=eq.{capture_id}", {"transcript": source_text}
+            )
+
+        generic = await asyncio.to_thread(
+            self.provider.extract_capture,
+            capture["source_type"],
+            source_text,
+            artifact.get("media_type") if artifact else None,
+            content if capture["source_type"] == "photo" else None,
+            None,
+        )
+        recipe_context = await self._recipe_context(job["user_id"])
+        concept_context = await self._concept_context(job["user_id"])
+        personalized = generic
+        if capture["source_type"] == "photo" and recipe_context:
+            personalized = await asyncio.to_thread(
+                self.provider.extract_capture,
+                capture["source_type"],
+                source_text,
+                artifact.get("media_type") if artifact else None,
+                content,
+                recipe_context[:12],
+            )
+
+        await self.client.delete("activity_proposals", f"capture_session_id=eq.{capture_id}")
+        candidate_count = 0
+        for index, activity in enumerate(personalized.activities, start=1):
+            generic_activity = generic.activities[min(index - 1, len(generic.activities) - 1)]
+            proposal = await self.client.insert(
+                "activity_proposals",
+                {
+                    "user_id": job["user_id"],
+                    "capture_session_id": capture_id,
+                    "proposal_order": index,
+                    "activity_type": activity.activity_type,
+                    "label": activity.label,
+                    "generic_guess": generic_activity.model_dump(mode="json"),
+                    "personalized_guess": activity.model_dump(mode="json"),
+                    "warnings": activity.warnings,
+                },
+            )
+            if activity.activity_type == "meal":
+                ingredient_text = " ".join(item.name for item in activity.ingredients)
+                query_text = f"{activity.label} {ingredient_text}"
+                ranked: list[tuple[float, dict[str, Any]]] = []
+                for context in recipe_context:
+                    candidate_text = f"{context['name']} {' '.join(context.get('ingredients', []))}"
+                    score = self._match_score(query_text, candidate_text)
+                    if activity.label.lower() == str(context["name"]).lower():
+                        score = 1.0
+                    ranked.append((score, context))
+                ranked.sort(key=lambda item: item[0], reverse=True)
+                for candidate_order, (score, context) in enumerate(ranked[:8], start=1):
+                    await self.client.insert(
+                        "proposal_candidates",
+                        {
+                            "user_id": job["user_id"],
+                            "activity_proposal_id": proposal["id"],
+                            "candidate_order": candidate_order,
+                            "candidate_kind": "recipe",
+                            "recipe_id": context["recipe_id"],
+                            "score": min(1.0, max(0.05, score)),
+                            "score_breakdown": {"text_and_ingredient_overlap": score},
+                            "explanation": (
+                                f"Saved dish with {len(context.get('ingredients', []))} "
+                                "confirmed ingredients."
+                            ),
+                            "snapshot": context,
+                        },
+                    )
+                    candidate_count += 1
+            else:
+                allowed_types = self._candidate_concept_types(activity.activity_type)
+                ranked_concepts = [
+                    (self._match_score(activity.label, str(context["name"])), context)
+                    for context in concept_context
+                    if context["concept_type"] in allowed_types
+                ]
+                ranked_concepts.sort(key=lambda item: item[0], reverse=True)
+                for candidate_order, (score, context) in enumerate(ranked_concepts[:8], start=1):
+                    await self.client.insert(
+                        "proposal_candidates",
+                        {
+                            "user_id": job["user_id"],
+                            "activity_proposal_id": proposal["id"],
+                            "candidate_order": candidate_order,
+                            "candidate_kind": "concept",
+                            "concept_id": context["concept_id"],
+                            "score": min(1.0, max(0.05, score)),
+                            "score_breakdown": {"label_overlap": score},
+                            "explanation": (
+                                f"Saved {str(context['concept_type']).replace('_', ' ')}."
+                            ),
+                            "snapshot": context,
+                        },
+                    )
+                    candidate_count += 1
+
+        await self.client.update(
+            "capture_sessions",
+            f"id=eq.{capture_id}",
+            {"status": "ready", "error": None},
+        )
+        return {
+            "capture_session_id": capture_id,
+            "proposal_count": len(personalized.activities),
+            "candidate_count": candidate_count,
+        }
+
+    async def _extract_food_label_capture(self, job: dict[str, Any]) -> dict[str, Any]:
+        capture_id = job["payload"]["capture_session_id"]
+        rows = await self.client.select(
+            "capture_sessions", query=f"select=*&id=eq.{capture_id}&limit=1"
+        )
+        if not rows:
+            raise ValueError("Capture session does not exist")
+        capture = rows[0]
+        if not capture.get("artifact_id"):
+            raise ValueError("A food label photo is required")
+
+        artifacts = await self.client.select(
+            "artifacts", query=f"select=*&id=eq.{capture['artifact_id']}&limit=1"
+        )
+        if not artifacts:
+            raise ValueError("Capture artifact does not exist")
+        artifact = artifacts[0]
+        await self.client.update(
+            "capture_sessions",
+            f"id=eq.{capture_id}",
+            {
+                "status": "processing",
+                "provider": self.provider.name,
+                "model": self.provider.product_label_model,
+                "prompt_version": "food-label-v1",
+            },
+        )
+        content = await self.client.download(artifact["bucket"], artifact["object_path"])
+        proposal = await asyncio.to_thread(
+            self.provider.extract_product_label,
+            artifact["media_type"],
+            content,
+        )
+        serialized = proposal.model_dump(mode="json")
+        attributes = {
+            **(capture.get("attributes") or {}),
+            "food_label_proposal": serialized,
+        }
+        await self.client.update(
+            "capture_sessions",
+            f"id=eq.{capture_id}",
+            {"status": "ready", "attributes": attributes, "error": None},
+        )
+        return {
+            "capture_session_id": capture_id,
+            "ingredient_count": len(proposal.ingredients),
+            "warning_count": len(proposal.warnings),
+        }
 
     async def _extract_catalogue(self, job: dict[str, Any]) -> dict[str, Any]:
         extraction_id = job["payload"]["catalogue_extraction_id"]
@@ -359,7 +712,17 @@ class Worker:
             "extraction_runs",
             "field_assertions",
             "catalogue_extractions",
+            "capture_sessions",
+            "activity_proposals",
+            "proposal_candidates",
             "event_concepts",
+            "food_items",
+            "food_item_aliases",
+            "recipes",
+            "recipe_versions",
+            "recipe_components",
+            "food_batches",
+            "concept_search_documents",
             "concepts",
             "concept_aliases",
             "concept_relations",
@@ -376,7 +739,14 @@ class Worker:
             )
             for table in table_names
         }
-        for table in ("concepts", "concept_aliases", "concept_relations", "compositions"):
+        for table in (
+            "concepts",
+            "concept_aliases",
+            "concept_relations",
+            "compositions",
+            "food_items",
+            "food_item_aliases",
+        ):
             tables[table] = await self.client.select(
                 table,
                 query=(f"select=*&or=(user_id.eq.{user_id},user_id.is.null)&order=created_at.asc"),

@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 JobType = Literal[
     "extraction",
     "catalogue_extraction",
+    "capture_extraction",
+    "search_index",
     "analysis",
     "report",
     "export",
@@ -33,6 +35,11 @@ class ExtractionJobRequest(BaseModel):
 class CatalogueExtractionJobRequest(BaseModel):
     concept_id: UUID
     artifact_id: UUID
+
+
+class CaptureExtractionJobRequest(BaseModel):
+    capture_session_id: UUID
+    mode: Literal["activity", "food_label"] = "activity"
 
 
 class AnalysisJobRequest(BaseModel):
@@ -98,6 +105,37 @@ class ProductLabelProposal(BaseModel):
     variant_confidence: float | None = Field(default=None, ge=0, le=1)
     variant_evidence: str | None = Field(default=None, max_length=500)
     ingredients: list[IngredientProposal] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CaptureIngredientProposal(BaseModel):
+    name: str = Field(min_length=1, max_length=240)
+    confidence: float = Field(ge=0, le=1)
+    evidence: str = Field(default="", max_length=500)
+    basis: list[Literal["visible", "spoken", "matched_recipe", "personal_pattern"]] = Field(
+        default_factory=list
+    )
+
+
+class ActivityCaptureProposal(BaseModel):
+    activity_type: Literal[
+        "meal",
+        "meal_preparation",
+        "skin_contact",
+        "product_use",
+        "topical_treatment",
+        "medication",
+        "activity",
+        "note",
+    ]
+    label: str = Field(min_length=1, max_length=240)
+    ingredients: list[CaptureIngredientProposal] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CaptureProposalBundle(BaseModel):
+    activities: list[ActivityCaptureProposal] = Field(min_length=1, max_length=12)
     warnings: list[str] = Field(default_factory=list)
 
 

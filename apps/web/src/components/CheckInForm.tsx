@@ -1,6 +1,7 @@
 import {useState, type FormEvent} from "react";
 import type {Session} from "@supabase/supabase-js";
 import {uploadArtifact} from "../lib/artifacts";
+import {localDatetimeToIso, localDatetimeValue} from "../lib/datetime";
 import {photoViews} from "../lib/photos";
 import {supabase} from "../lib/supabase";
 import type {BodyArea, Profile} from "../types";
@@ -19,11 +20,6 @@ function newPhotoEntry(bodyAreaCode: string, viewCode = "overview"): PhotoEntry 
   return {id: crypto.randomUUID(), bodyAreaCode, viewCode, file: null};
 }
 
-function localDatetime(): string {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-}
-
 export function CheckInForm({
   session,
   profile,
@@ -38,7 +34,7 @@ export function CheckInForm({
   const [period, setPeriod] = useState<"morning" | "evening">(
     new Date().getHours() < 14 ? "morning" : "evening",
   );
-  const [occurred, setOccurred] = useState(localDatetime());
+  const [occurred, setOccurred] = useState(localDatetimeValue());
   const [bodyArea, setBodyArea] = useState("both_hands");
   const [scores, setScores] = useState<Record<string, number | null>>(
     Object.fromEntries(symptoms.map((symptom) => [symptom, null])),
@@ -79,7 +75,7 @@ export function CheckInForm({
     setError(null);
     setSuccess(null);
     try {
-      const time = new Date(occurred).toISOString();
+      const time = localDatetimeToIso(occurred);
       const {data: skinEvent, error: eventError} = await supabase
         .from("events")
         .insert({

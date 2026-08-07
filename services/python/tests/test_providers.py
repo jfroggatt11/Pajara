@@ -38,4 +38,27 @@ def test_low_cost_openai_model_defaults_are_separated_by_task() -> None:
 
     assert settings.openai_extraction_model == "gpt-4.1-mini"
     assert settings.openai_product_label_model == "gpt-5.4-mini"
+    assert settings.openai_capture_model == "gpt-5.4-mini"
     assert settings.openai_transcription_model == "gpt-4o-mini-transcribe"
+
+
+def test_photo_capture_keeps_generic_guess_separate_from_saved_recipe_context() -> None:
+    provider = FakeExtractionProvider()
+
+    generic = provider.extract_capture("photo", "", "image/jpeg", b"photo", None)
+    personalized = provider.extract_capture(
+        "photo",
+        "",
+        "image/jpeg",
+        b"photo",
+        [{"name": "Tomato pasta", "ingredients": ["Tomato", "Pasta"]}],
+    )
+
+    assert generic.activities[0].label == "Photographed meal"
+    assert generic.activities[0].ingredients == []
+    assert personalized.activities[0].label == "Tomato pasta"
+    assert [item.name for item in personalized.activities[0].ingredients] == [
+        "Tomato",
+        "Pasta",
+    ]
+    assert personalized.activities[0].ingredients[0].basis == ["matched_recipe"]

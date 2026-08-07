@@ -120,6 +120,109 @@ class CatalogueExtractionClient:
         return []
 
 
+class FoodLabelCaptureClient:
+    def __init__(self) -> None:
+        self.updates: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def select(self, table: str, query: str = "") -> list[dict[str, Any]]:
+        if table == "capture_sessions":
+            return [
+                {
+                    "id": "capture-label-one",
+                    "artifact_id": "artifact-one",
+                    "attributes": {"capture_purpose": "food_label"},
+                }
+            ]
+        if table == "artifacts":
+            return [
+                {
+                    "id": "artifact-one",
+                    "bucket": "input-originals",
+                    "object_path": "user/food/label.jpg",
+                    "media_type": "image/jpeg",
+                }
+            ]
+        raise AssertionError(f"Unexpected select table: {table}")
+
+    async def download(self, bucket: str, path: str) -> bytes:
+        assert bucket == "input-originals"
+        assert path == "user/food/label.jpg"
+        return b"label"
+
+    async def update(self, table: str, query: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        self.updates.append((table, query, payload))
+        return []
+
+
+class CaptureExtractionClient:
+    def __init__(self) -> None:
+        self.candidates: list[dict[str, Any]] = []
+        self.proposals: list[dict[str, Any]] = []
+        self.updates: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def select(self, table: str, query: str = "") -> list[dict[str, Any]]:
+        if table == "capture_sessions":
+            return [
+                {
+                    "id": "capture-one",
+                    "source_type": "voice",
+                    "transcript": "took Test tablet then applied Hand cream",
+                    "original_text": None,
+                    "artifact_id": None,
+                }
+            ]
+        if table == "recipes":
+            return []
+        if table == "concepts":
+            return [
+                {
+                    "id": "medicine-one",
+                    "concept_type": "medication",
+                    "canonical_name": "Test tablet",
+                    "attributes": {},
+                },
+                {
+                    "id": "cream-one",
+                    "concept_type": "treatment",
+                    "canonical_name": "Hand cream",
+                    "attributes": {},
+                },
+            ]
+        if table == "concept_versions":
+            return [
+                {
+                    "id": "medicine-version-one",
+                    "concept_id": "medicine-one",
+                    "version_number": 1,
+                },
+                {
+                    "id": "cream-version-one",
+                    "concept_id": "cream-one",
+                    "version_number": 1,
+                },
+            ]
+        raise AssertionError(f"Unexpected select table: {table} ({query})")
+
+    async def insert(self, table: str, payload: Any, single: bool = True) -> dict[str, Any]:
+        if table == "activity_proposals":
+            row = {**payload, "id": f"proposal-{len(self.proposals) + 1}"}
+            self.proposals.append(row)
+            return row
+        if table == "proposal_candidates":
+            self.candidates.append(payload)
+            return {**payload, "id": f"candidate-{len(self.candidates)}"}
+        raise AssertionError(f"Unexpected insert table: {table}")
+
+    async def update(self, table: str, query: str, payload: dict[str, Any]) -> list[Any]:
+        self.updates.append((table, query, payload))
+        return []
+
+    async def delete(self, table: str, filters: str) -> list[Any]:
+        assert table == "activity_proposals"
+        assert "capture-one" in filters
+        return []
+
+
 async def test_run_once_claims_and_processes_one_job() -> None:
     job = {"id": "job-one", "job_type": "analysis"}
     worker = RecordingWorker([job])
@@ -179,3 +282,55 @@ async def test_catalogue_label_extraction_stays_a_proposal() -> None:
     assert final_update["status"] == "succeeded"
     assert final_update["proposal"]["ingredients"][0]["name"] == "Water"
     assert result["ingredient_count"] == 2
+
+
+async def test_food_label_capture_stays_reviewable_capture_data() -> None:
+    worker = object.__new__(Worker)
+    worker.settings = Settings()
+    capture_client = FoodLabelCaptureClient()
+    worker.client = cast(SupabaseClient, capture_client)
+    worker.provider = LabelProvider()
+
+    result = await worker._extract_capture(
+        {
+            "user_id": "user-one",
+            "payload": {"capture_session_id": "capture-label-one", "mode": "food_label"},
+        }
+    )
+
+    assert capture_client.updates[0][2]["prompt_version"] == "food-label-v1"
+    final_update = capture_client.updates[-1][2]
+    assert final_update["status"] == "ready"
+    assert final_update["attributes"]["capture_purpose"] == "food_label"
+    assert final_update["attributes"]["food_label_proposal"]["product_name"] == "Test wash"
+    assert result["ingredient_count"] == 2
+
+
+async def test_voice_capture_ranks_saved_medicine_and_treatment_candidates() -> None:
+    worker = object.__new__(Worker)
+    worker.settings = Settings()
+    capture_client = CaptureExtractionClient()
+    worker.client = cast(SupabaseClient, capture_client)
+    worker.provider = FakeExtractionProvider()
+
+    result = await worker._extract_capture(
+        {
+            "user_id": "user-one",
+            "payload": {"capture_session_id": "capture-one"},
+        }
+    )
+
+    assert [proposal["activity_type"] for proposal in capture_client.proposals] == [
+        "medication",
+        "topical_treatment",
+    ]
+    assert [candidate["concept_id"] for candidate in capture_client.candidates] == [
+        "medicine-one",
+        "cream-one",
+    ]
+    assert all(candidate["candidate_kind"] == "concept" for candidate in capture_client.candidates)
+    assert capture_client.candidates[0]["snapshot"]["concept_version_id"] == (
+        "medicine-version-one"
+    )
+    assert capture_client.updates[-1][2]["status"] == "ready"
+    assert result["candidate_count"] == 2

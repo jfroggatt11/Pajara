@@ -11,6 +11,7 @@ from pajara.auth import CurrentUser
 from pajara.config import Settings, get_settings
 from pajara.domain import (
     AnalysisJobRequest,
+    CaptureExtractionJobRequest,
     CatalogueExtractionJobRequest,
     DeletionJobRequest,
     ExportJobRequest,
@@ -30,6 +31,15 @@ def _user_client(settings: Settings, token: str) -> SupabaseClient:
             detail="Supabase user access is not configured",
         )
     return SupabaseClient(settings.supabase_url, settings.supabase_publishable_key, token)
+
+
+async def _require_ai_enabled(client: SupabaseClient) -> None:
+    profiles = await client.select("profiles", query="select=ai_enabled&limit=1")
+    if not profiles or profiles[0].get("ai_enabled") is not True:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI-assisted organization is not enabled for this profile",
+        )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -89,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobAccepted:
         client = _user_client(active_settings, user.token)
+        await _require_ai_enabled(client)
         await ensure_owned(client, "events", request.event_id)
         if request.artifact_id:
             await ensure_owned(client, "artifacts", request.artifact_id)
@@ -147,6 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobAccepted:
         client = _user_client(active_settings, user.token)
+        await _require_ai_enabled(client)
         concept = await ensure_owned(client, "concepts", request.concept_id)
         if concept.get("user_id") != str(user.user_id):
             raise HTTPException(
@@ -179,6 +191,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         process_queued_job(background_tasks)
         return JobAccepted(job_id=job["id"], related_id=extraction["id"])
+
+    @app.post(
+        "/v1/jobs/capture-extraction",
+        response_model=JobAccepted,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def request_capture_extraction(
+        request: CaptureExtractionJobRequest,
+        background_tasks: BackgroundTasks,
+        user: CurrentUser,
+        idempotency_key: Annotated[str | None, Header()] = None,
+    ) -> JobAccepted:
+        client = _user_client(active_settings, user.token)
+        await _require_ai_enabled(client)
+        capture = await ensure_owned(client, "capture_sessions", request.capture_session_id)
+        if capture.get("status") not in {"draft", "failed"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Capture is already being processed or reviewed",
+            )
+        if capture.get("artifact_id"):
+            await ensure_owned(client, "artifacts", UUID(str(capture["artifact_id"])))
+        await client.update(
+            "capture_sessions",
+            f"id=eq.{request.capture_session_id}",
+            {"status": "queued", "error": None},
+        )
+        job = await enqueue_job(
+            client,
+            user,
+            "capture_extraction",
+            request.model_dump(mode="json"),
+            idempotency_key,
+        )
+        process_queued_job(background_tasks)
+        return JobAccepted(job_id=job["id"], related_id=request.capture_session_id)
 
     @app.post(
         "/v1/jobs/report",

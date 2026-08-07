@@ -88,6 +88,11 @@ const assertions = [
   ["catalogue create function", await scalar("select count(*) from pg_proc where proname = 'create_catalogue_item'"), 1],
   ["catalogue save function", await scalar("select count(*) from pg_proc where proname = 'save_catalogue_item'"), 1],
   ["meal-to-recipe function", await scalar("select count(*) from pg_proc where proname = 'save_meal_event_as_recipe'"), 1],
+  ["meal-to-food-recipe function", await scalar("select count(*) from pg_proc where proname = 'save_meal_event_as_food_recipe'"), 1],
+  ["food save function", await scalar("select count(*) from pg_proc where proname = 'save_food_item'"), 1],
+  ["versioned recipe save function", await scalar("select count(*) from pg_proc where proname = 'save_recipe_definition'"), 1],
+  ["recipe flatten function", await scalar("select count(*) from pg_proc where proname = 'flatten_recipe_components'"), 1],
+  ["activity bundle function", await scalar("select count(*) from pg_proc where proname = 'log_activity_bundle'"), 1],
 ];
 
 let failed = false;
@@ -103,6 +108,7 @@ for (const [label, actual, minimum] of assertions) {
 const userA = "00000000-0000-4000-8000-000000000001";
 const userB = "00000000-0000-4000-8000-000000000002";
 const userBConcept = "20000000-0000-4000-8000-000000000002";
+const userBFood = "50000000-0000-4000-8000-000000000002";
 const userBMealEvent = "10000000-0000-4000-8000-000000000002";
 
 await database.exec(`
@@ -111,6 +117,8 @@ await database.exec(`
   values ('${userA}', 'User A'), ('${userB}', 'User B');
   insert into public.concepts (id, user_id, concept_type, canonical_name)
   values ('${userBConcept}', '${userB}', 'product', 'User B private product');
+  insert into public.food_items (id, user_id, canonical_name)
+  values ('${userBFood}', '${userB}', 'User B private food');
   insert into public.events (
     id, user_id, type_code, occurred_start, recorded_timezone, trust_status
   ) values (
@@ -306,6 +314,46 @@ if (savedMealRecipeLinks === 1 && savedMealRecipeIngredients === 3) {
       + `(${savedMealRecipeLinks}/${savedMealRecipeIngredients})`,
   );
 }
+
+const graphMealEvent = "10000000-0000-4000-8000-000000000004";
+await database.exec(`
+  insert into public.events (
+    id, user_id, type_code, occurred_start, recorded_timezone, trust_status,
+    attributes
+  ) values (
+    '${graphMealEvent}', '${userA}', 'meal',
+    '2026-07-29T12:30:00Z', 'Europe/Rome', 'trusted',
+    '{"ingestion_method":"drank"}'::jsonb
+  );
+  select public.save_meal_event_as_food_recipe(
+    '${graphMealEvent}',
+    'Saved smoothie',
+    '["Banana","Oat milk"]'::jsonb,
+    'Blend until smooth',
+    'Peeled the banana with both hands'
+  );
+`);
+const graphMealRecipeLinks = await scalar(`
+  select count(*) from public.event_concepts link
+  join public.recipe_versions version on version.id = link.recipe_version_id
+  join public.recipes recipe on recipe.id = version.recipe_id
+  where link.event_id = '${graphMealEvent}' and link.role = 'consumed'
+    and link.ingestion_method = 'drank' and recipe.name = 'Saved smoothie'
+`);
+const graphMealRecipeIngredients = await scalar(`
+  select count(*) from public.recipe_components component
+  join public.recipe_versions version on version.id = component.recipe_version_id
+  join public.recipes recipe on recipe.id = version.recipe_id
+  where recipe.user_id = '${userA}' and recipe.name = 'Saved smoothie'
+`);
+if (graphMealRecipeLinks === 1 && graphMealRecipeIngredients === 2) {
+  console.log("PASS historical meal promoted into the food recipe graph: 1");
+} else {
+  failed = true;
+  console.error(
+    `FAIL graph-native meal recipe save/link (${graphMealRecipeLinks}/${graphMealRecipeIngredients})`,
+  );
+}
 if (
   !(await expectDenied(
     "duplicate meal recipe conversion",
@@ -440,6 +488,364 @@ if (
       + `${recipeVariationRelations}/${recipePreparationDetails}/`
       + `${retainedHistoricalVersionLinks})`,
   );
+}
+
+await database.exec(`
+  select public.save_recipe_definition(
+    'Tomato sauce',
+    '[{"name":"Tomato"},{"name":"Onion"}]'::jsonb,
+    'Simmer until reduced',
+    2,
+    'portions',
+    null,
+    null,
+    '{}'::jsonb
+  );
+
+  select public.save_recipe_definition(
+    'Pasta with tomato sauce',
+    jsonb_build_array(
+      jsonb_build_object('name', 'Pasta'),
+      jsonb_build_object(
+        'source_recipe_version_id',
+        (
+          select version.id
+          from public.recipe_versions version
+          join public.recipes recipe on recipe.id = version.recipe_id
+          where recipe.user_id = '${userA}' and recipe.name = 'Tomato sauce'
+            and version.effective_to is null
+        )
+      )
+    ),
+    'Cook pasta and add sauce',
+    1,
+    'portion',
+    null,
+    null,
+    '{}'::jsonb
+  );
+`);
+
+const flattenedNestedIngredients = await scalar(`
+  select count(*)
+  from public.flatten_recipe_components((
+    select version.id
+    from public.recipe_versions version
+    join public.recipes recipe on recipe.id = version.recipe_id
+    where recipe.user_id = '${userA}' and recipe.name = 'Pasta with tomato sauce'
+      and version.effective_to is null
+  ))
+`);
+const nestedDepth = await scalar(`
+  select max(depth)
+  from public.flatten_recipe_components((
+    select version.id
+    from public.recipe_versions version
+    join public.recipes recipe on recipe.id = version.recipe_id
+    where recipe.user_id = '${userA}' and recipe.name = 'Pasta with tomato sauce'
+      and version.effective_to is null
+  ))
+`);
+if (flattenedNestedIngredients === 3 && nestedDepth === 2) {
+  console.log("PASS exact-version nested recipe flattening: 1");
+} else {
+  failed = true;
+  console.error(
+    `FAIL nested recipe flattening: expected 3 leaves/depth 2, found ${flattenedNestedIngredients}/${nestedDepth}`,
+  );
+}
+
+await database.exec(`
+  select public.save_recipe_definition(
+    'Tomato sauce',
+    jsonb_build_array(jsonb_build_object(
+      'source_recipe_version_id',
+      (
+        select version.id
+        from public.recipe_versions version
+        join public.recipes recipe on recipe.id = version.recipe_id
+        where recipe.user_id = '${userA}' and recipe.name = 'Pasta with tomato sauce'
+          and version.effective_to is null
+      )
+    )),
+    'Reuse a finite amount of the previous pasta batch',
+    null,
+    null,
+    (
+      select id from public.recipes
+      where user_id = '${userA}' and name = 'Tomato sauce'
+    ),
+    null,
+    '{}'::jsonb
+  )
+`);
+console.log("PASS prior recipe versions can be reused without creating a graph cycle: 1");
+
+await database.exec(`
+  select public.save_recipe_definition(
+    'Jarred pesto',
+    jsonb_build_array(
+      jsonb_build_object('name', 'Basil'),
+      jsonb_build_object('name', 'Olive oil')
+    ),
+    null,
+    null,
+    null,
+    null,
+    null,
+    jsonb_build_object(
+      'output_food_kind', 'commercial_product',
+      'created_from_capture_session_id', 'label-review'
+    )
+  )
+`);
+const commercialProductCount = await scalar(`
+  select count(*) from public.recipes recipe
+  join public.food_items food on food.id = recipe.output_food_item_id
+  where recipe.user_id = '${userA}' and recipe.name = 'Jarred pesto'
+    and food.food_kind = 'commercial_product'
+`);
+if (commercialProductCount === 1) {
+  console.log("PASS reviewed ingredient label creates a commercial-food formulation: 1");
+} else {
+  failed = true;
+  console.error(`FAIL commercial-food formulation: expected 1, found ${commercialProductCount}`);
+}
+
+if (
+  !(await expectDenied(
+    "exact recipe-version cycle",
+    `
+      insert into public.recipe_components (
+        user_id, recipe_version_id, component_food_item_id,
+        source_recipe_version_id, component_order
+      )
+      select
+        '${userA}', version.id, recipe.output_food_item_id, version.id, 2
+      from public.recipe_versions version
+      join public.recipes recipe on recipe.id = version.recipe_id
+      where recipe.user_id = '${userA}' and recipe.name = 'Tomato sauce'
+        and version.effective_to is null
+    `,
+  ))
+) {
+  failed = true;
+}
+
+if (
+  !(await expectDenied(
+    "mismatched recipe output participant",
+    `
+      insert into public.event_concepts (
+        user_id, event_id, food_item_id, recipe_version_id, role, review_state
+      ) values (
+        '${userA}',
+        '${ownEventId}',
+        (
+          select id from public.food_items
+          where user_id = '${userA}' and canonical_name = 'Tomato'
+          limit 1
+        ),
+        (
+          select version.id from public.recipe_versions version
+          join public.recipes recipe on recipe.id = version.recipe_id
+          where recipe.user_id = '${userA}' and recipe.name = 'Pasta with tomato sauce'
+            and version.effective_to is null
+        ),
+        'present',
+        'accepted'
+      )
+    `,
+  ))
+) {
+  failed = true;
+}
+
+const captureId = "60000000-0000-4000-8000-000000000001";
+await database.exec(`
+  insert into public.capture_sessions (
+    id, user_id, profile_id, source_type, occurred_at, recorded_timezone, status
+  ) values (
+    '${captureId}', '${userA}',
+    (select id from public.profiles where user_id = '${userA}'),
+    'photo', '2026-07-29T13:00:00Z', 'Europe/Rome', 'ready'
+  );
+  insert into public.activity_proposals (
+    user_id, capture_session_id, proposal_order, activity_type, label
+  ) values (
+    '${userA}', '${captureId}', 1, 'meal', 'Pasta with tomato sauce'
+  );
+
+  select public.log_activity_bundle(
+    (select id from public.profiles where user_id = '${userA}'),
+    '2026-07-29T13:00:00Z',
+    'Europe/Rome',
+    '${captureId}',
+    jsonb_build_array(
+      jsonb_build_object(
+        'type_code', 'meal',
+        'label', 'Pasta with tomato sauce',
+        'source_method', 'photo',
+        'participants', jsonb_build_array(jsonb_build_object(
+          'food_item_id', (
+            select output_food_item_id from public.recipes
+            where user_id = '${userA}' and name = 'Pasta with tomato sauce'
+          ),
+          'recipe_version_id', (
+            select version.id from public.recipe_versions version
+            join public.recipes recipe on recipe.id = version.recipe_id
+            where recipe.user_id = '${userA}' and recipe.name = 'Pasta with tomato sauce'
+              and version.effective_to is null
+          ),
+          'role', 'consumed',
+          'ingestion_method', 'eaten',
+          'route', 'oral'
+        ))
+      ),
+      jsonb_build_object(
+        'type_code', 'meal_preparation',
+        'label', 'Pasta preparation',
+        'source_method', 'photo',
+        'parent_order', 1,
+        'relation_type', 'prepared_by',
+        'participants', jsonb_build_array(
+          jsonb_build_object(
+            'food_item_id', (
+              select output_food_item_id from public.recipes
+              where user_id = '${userA}' and name = 'Pasta with tomato sauce'
+            ),
+            'recipe_version_id', (
+              select version.id from public.recipe_versions version
+              join public.recipes recipe on recipe.id = version.recipe_id
+              where recipe.user_id = '${userA}' and recipe.name = 'Pasta with tomato sauce'
+                and version.effective_to is null
+            ),
+            'role', 'prepared'
+          ),
+          jsonb_build_object(
+            'food_item_id', (
+              select id from public.food_items
+              where user_id = '${userA}' and canonical_name = 'Tomato'
+              limit 1
+            ),
+            'role', 'contacted',
+            'body_area_code', 'both_hands',
+            'direct_contact', 'yes'
+          )
+        )
+      )
+    )
+  );
+`);
+const captureEventCount = await scalar(`
+  select count(*) from public.events where capture_session_id = '${captureId}'
+`);
+const captureRelationCount = await scalar(`
+  select count(*) from public.event_relations relation
+  join public.events parent on parent.id = relation.from_event_id
+  join public.events child on child.id = relation.to_event_id
+  where parent.capture_session_id = '${captureId}' and child.capture_session_id = '${captureId}'
+`);
+const confirmedCaptureCount = await scalar(`
+  select count(*) from public.capture_sessions
+  where id = '${captureId}' and status = 'confirmed' and confirmed_at is not null
+`);
+const acceptedCaptureProposals = await scalar(`
+  select count(*) from public.activity_proposals
+  where capture_session_id = '${captureId}' and review_state = 'accepted'
+`);
+const captureBatchCount = await scalar(`
+  select count(*) from public.food_batches batch
+  join public.events event on event.id = batch.produced_by_event_id
+  where event.capture_session_id = '${captureId}'
+`);
+if (
+  captureEventCount === 2
+  && captureRelationCount === 1
+  && confirmedCaptureCount === 1
+  && acceptedCaptureProposals === 1
+  && captureBatchCount === 1
+) {
+  console.log("PASS confirmed capture creates linked ingestion and preparation events: 1");
+} else {
+  failed = true;
+  console.error(
+    "FAIL capture activity bundle "
+      + `(${captureEventCount}/${captureRelationCount}/${confirmedCaptureCount}/${acceptedCaptureProposals}/${captureBatchCount})`,
+  );
+}
+
+await database.exec(`
+  select public.save_recipe_definition(
+    'Leftover pasta bake',
+    jsonb_build_array(jsonb_build_object(
+      'source_recipe_version_id',
+      (
+        select batch.recipe_version_id from public.food_batches batch
+        join public.events event on event.id = batch.produced_by_event_id
+        where event.capture_session_id = '${captureId}'
+        order by batch.prepared_at desc limit 1
+      )
+    )),
+    'Bake the remaining pasta',
+    null,
+    null,
+    null,
+    null,
+    '{}'::jsonb
+  )
+`);
+const leftoverComponentCount = await scalar(`
+  select count(*) from public.recipe_components component
+  join public.recipe_versions version on version.id = component.recipe_version_id
+  join public.recipes recipe on recipe.id = version.recipe_id
+  where recipe.user_id = '${userA}' and recipe.name = 'Leftover pasta bake'
+    and component.source_recipe_version_id is not null
+`);
+await database.exec(`
+  select public.log_activity_bundle(
+    (select id from public.profiles where user_id = '${userA}'),
+    '2026-07-30T13:00:00Z',
+    'Europe/Rome',
+    null,
+    jsonb_build_array(jsonb_build_object(
+      'type_code', 'meal_preparation',
+      'label', 'Leftover pasta bake preparation',
+      'participants', jsonb_build_array(jsonb_build_object(
+        'food_batch_id', (
+          select batch.id from public.food_batches batch
+          join public.events event on event.id = batch.produced_by_event_id
+          where event.capture_session_id = '${captureId}'
+          order by batch.prepared_at desc limit 1
+        ),
+        'role', 'used'
+      ))
+    ))
+  )
+`);
+const leftoverBatchUseCount = await scalar(`
+  select count(*) from public.event_concepts participant
+  join public.events event on event.id = participant.event_id
+  where event.user_id = '${userA}' and event.label = 'Leftover pasta bake preparation'
+    and participant.food_batch_id is not null and participant.role = 'used'
+`);
+if (leftoverComponentCount === 1 && leftoverBatchUseCount === 1) {
+  console.log("PASS leftovers preserve reusable recipe version and actual batch use: 1");
+} else {
+  failed = true;
+  console.error(`FAIL leftover plan/event identity: ${leftoverComponentCount}/${leftoverBatchUseCount}`);
+}
+
+if (
+  !(await expectDenied(
+    "cross-tenant recipe output",
+    `
+      insert into public.recipes (user_id, name, output_food_item_id)
+      values ('${userA}', 'Invalid private food recipe', '${userBFood}')
+    `,
+  ))
+) {
+  failed = true;
 }
 
 if (

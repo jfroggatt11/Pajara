@@ -34,6 +34,8 @@ services:
         value: gpt-4.1-mini
       - key: OPENAI_PRODUCT_LABEL_MODEL
         value: gpt-5.4-mini
+      - key: OPENAI_CAPTURE_MODEL
+        value: gpt-5.4-mini
       - key: OPENAI_TRANSCRIPTION_MODEL
         value: gpt-4o-mini-transcribe
       - key: WORKER_NAME

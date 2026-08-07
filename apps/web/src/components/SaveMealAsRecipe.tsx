@@ -1,7 +1,7 @@
 import {useState, type FormEvent} from "react";
 import {parseIngredientNames} from "../lib/catalogue";
 import {supabase} from "../lib/supabase";
-import type {CatalogueItem} from "../types";
+import type {Recipe} from "../types";
 import {StatusMessage} from "./StatusMessage";
 
 export function SaveMealAsRecipe({
@@ -18,7 +18,7 @@ export function SaveMealAsRecipe({
   defaultMethod?: string;
   defaultContact?: string;
   initiallyOpen?: boolean;
-  onSaved?: (recipe: CatalogueItem) => void;
+  onSaved?: (recipe: Recipe) => void;
   onDismiss?: () => void;
 }) {
   const [open, setOpen] = useState(initiallyOpen);
@@ -36,7 +36,7 @@ export function SaveMealAsRecipe({
     setError(null);
     try {
       const {data, error: saveError} = await supabase.rpc(
-        "save_meal_event_as_recipe",
+        "save_meal_event_as_food_recipe",
         {
           meal_event_id: mealEventId,
           recipe_name: name.trim(),
@@ -46,9 +46,9 @@ export function SaveMealAsRecipe({
         },
       );
       if (saveError) throw saveError;
-      const recipe = (Array.isArray(data) ? data[0] : data) as CatalogueItem | undefined;
+      const recipe = (Array.isArray(data) ? data[0] : data) as Recipe | undefined;
       if (!recipe) throw new Error("The saved recipe was not returned.");
-      setSavedName(recipe.canonical_name);
+      setSavedName(recipe.name);
       setOpen(false);
       onSaved?.(recipe);
     } catch (caught) {

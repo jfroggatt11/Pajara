@@ -7,6 +7,7 @@ export function useVoiceRecorder() {
   const chunks = useRef<Blob[]>([]);
   const startedAt = useRef<number | null>(null);
   const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopResolver = useRef<((file: File | null) => void) | null>(null);
   const [recording, setRecording] = useState(false);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
@@ -30,7 +31,8 @@ export function useVoiceRecorder() {
             ? "ogg"
             : "webm";
       const blob = new Blob(chunks.current, {type});
-      setAudioFile(new File([blob], `voice-${Date.now()}.${extension}`, {type}));
+      const nextAudioFile = new File([blob], `voice-${Date.now()}.${extension}`, {type});
+      setAudioFile(nextAudioFile);
       setDurationSeconds(
         startedAt.current === null
           ? null
@@ -40,6 +42,8 @@ export function useVoiceRecorder() {
       stream.getTracks().forEach((track) => track.stop());
       recorder.current = null;
       setRecording(false);
+      stopResolver.current?.(nextAudioFile);
+      stopResolver.current = null;
     };
     mediaRecorder.start();
     recorder.current = mediaRecorder;
@@ -49,8 +53,12 @@ export function useVoiceRecorder() {
     }, maxRecordingSeconds * 1000);
   }
 
-  function stop() {
-    if (recorder.current?.state === "recording") recorder.current.stop();
+  function stop(): Promise<File | null> {
+    if (recorder.current?.state !== "recording") return Promise.resolve(audioFile);
+    return new Promise((resolve) => {
+      stopResolver.current = resolve;
+      recorder.current?.stop();
+    });
   }
 
   function clear() {

@@ -40,10 +40,12 @@ arguments, or the frontend.
    For an existing Pajara project, confirm that the catalogue migrations
    `202607290002_catalogue.sql`, `202607290003_safe_catalogue_review.sql`, and
    `202607290004_editable_catalogue_recipes.sql` are present. Also confirm that
-   `202607310001_save_meal_as_recipe.sql` is listed as pending before approving the push.
+   `202607310001_save_meal_as_recipe.sql` and
+   `202608070001_activity_food_ontology.sql` are listed as pending before approving the push.
    They add versioned saved items, preserve manual data during image review, add editable
-   recipes/variations, and transactionally convert a logged meal into a linked recipe;
-   they do not replace existing logs.
+   recipes/variations, migrate recipes into the food/activity ontology, and transactionally
+   convert confirmed photo or voice captures into linked activity events. Existing logs and
+   their legacy version links are retained.
 
 5. In Authentication:
    - set the initial Site URL to the eventual Netlify production URL;
@@ -74,6 +76,7 @@ The secret key bypasses RLS. It belongs only in the Python API/worker secret sto
    `RUN_WORKER_IN_API=true`. The low-cost model routing defaults are:
    - `OPENAI_EXTRACTION_MODEL=gpt-4.1-mini` for routine text extraction;
    - `OPENAI_PRODUCT_LABEL_MODEL=gpt-5.4-mini` for photographed labels;
+   - `OPENAI_CAPTURE_MODEL=gpt-5.4-mini` for confirmed photo/voice activity proposals;
    - `OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe` only when the user
      explicitly requests backend fallback.
 4. Deploy and verify:

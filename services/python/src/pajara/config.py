@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # Label OCR gets a separate, stronger vision-capable model.
     openai_extraction_model: str = "gpt-4.1-mini"
     openai_product_label_model: str = "gpt-5.4-mini"
+    openai_capture_model: str = "gpt-5.4-mini"
     openai_transcription_model: str = "gpt-4o-mini-transcribe"
     extraction_provider: str = "fake"
 
