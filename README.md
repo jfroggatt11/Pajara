@@ -12,8 +12,9 @@ conditions, establish causes, or advise medication changes.
   deployable worker for extraction, analysis, reports, and exports
 - reusable, versioned medications, treatments, and personal/household products with
   private ingredient-label capture and human-reviewed AI extraction
-- photo/voice activity capture with ranked private meal matches, explicit confirmation,
-  versioned foods and recursively nested recipes, and separate ingestion/preparation events
+- mixed photo/label/screenshot/voice Quick Log sessions with ranked private matches,
+  explicit card-by-card confirmation, versioned foods and recursively nested recipes,
+  and separate ingestion/preparation events
 - `packages/schemas`: shared versioned JSON Schemas
 
 ## Ontology at a glance
@@ -21,9 +22,15 @@ conditions, establish causes, or advise medication changes.
 ```mermaid
 flowchart LR
   subgraph Review[Capture and human review]
-    Capture["capture_sessions<br/>photo · voice · text · manual"]
+    Capture["capture_sessions<br/>one mixed-media occurrence"]
+    Artifact["capture_artifacts<br/>ordered photos · labels · screenshots · voice"]
+    Message["capture_messages<br/>transcripts · typed/voice corrections"]
+    Field["capture_review_fields<br/>proposed vs confirmed cards"]
     Proposal["activity_proposals<br/>untrusted guesses"]
     Candidate["proposal_candidates<br/>ranked graph matches"]
+    Capture --> Artifact
+    Capture --> Message
+    Capture --> Field
     Capture --> Proposal --> Candidate
   end
 
@@ -55,7 +62,8 @@ flowchart LR
 
   Candidate -.->|suggests| Version
   Candidate -.->|suggests| Concept
-  Capture -->|only after confirmation| Event
+  Field -->|atomic save only when all required cards confirmed| Event
+  Artifact -.->|provenance retained| Event
   Participant -->|food involved| Food
   Participant -->|exact recipe used| Version
   Participant -->|exact leftovers used| Batch

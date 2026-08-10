@@ -16,6 +16,12 @@ from pajara.domain import (
     ExtractionProposal,
     ProductLabelProposal,
     ProposedAssertion,
+    QuickLogContact,
+    QuickLogFieldUpdate,
+    QuickLogImageRole,
+    QuickLogIngredient,
+    QuickLogRefinement,
+    QuickLogSynthesis,
 )
 
 EXTRACTION_INSTRUCTIONS = """
@@ -50,6 +56,26 @@ personal-pattern ingredient is visible. Return only structured proposals for hum
 confirmation.
 """.strip()
 
+QUICK_LOG_INSTRUCTIONS = """
+Synthesize exactly one real-world occurrence from all supplied photos, screenshots,
+labels, voice transcripts and typed notes. First interpret generic evidence, then use
+private saved-item candidates only for ranking identity matches; never let a saved
+candidate override visible or spoken evidence. Images may be meal photos, product
+fronts, ingredient labels, recipe screenshots or general activity photos, and must be
+classified internally. If several occurrences appear, do not combine them: list short
+possible_occurrences so the user can choose one. Do not ask for or infer duration,
+water temperature, quantities, dose, meal amount, or medical conclusions. Ingredients
+are hypotheses until confirmed. Food ingestion and preparation skin contact are
+distinct facts within the one occurrence. Return a concise validated proposal.
+""".strip()
+
+QUICK_LOG_REFINEMENT_INSTRUCTIONS = """
+Apply the user's correction to the supplied Quick Log review fields. Return only fields
+whose values must change. A correction may update several fields. Never add secondary
+details such as duration, water temperature, quantities, dose or meal amount. Use only
+field keys already present in the supplied review state and preserve its JSON shapes.
+""".strip()
+
 
 class ExtractionProvider(ABC):
     name: str
@@ -78,6 +104,20 @@ class ExtractionProvider(ABC):
         knowledge_context: list[dict[str, Any]] | None = None,
     ) -> CaptureProposalBundle:
         raise RuntimeError("Activity capture extraction is not supported by this provider")
+
+    def synthesize_quick_log(
+        self,
+        evidence: list[dict[str, Any]],
+        knowledge_context: dict[str, Any],
+    ) -> QuickLogSynthesis:
+        raise RuntimeError("Quick Log synthesis is not supported by this provider")
+
+    def refine_quick_log(
+        self,
+        review_fields: dict[str, Any],
+        correction: str,
+    ) -> QuickLogRefinement:
+        raise RuntimeError("Quick Log refinement is not supported by this provider")
 
 
 class FakeExtractionProvider(ExtractionProvider):
@@ -211,6 +251,105 @@ class FakeExtractionProvider(ExtractionProvider):
             )
         return CaptureProposalBundle(activities=activities)
 
+    def synthesize_quick_log(
+        self,
+        evidence: list[dict[str, Any]],
+        knowledge_context: dict[str, Any],
+    ) -> QuickLogSynthesis:
+        text = " ".join(str(item.get("text") or "") for item in evidence).strip()
+        lowered = text.lower()
+        recipes = knowledge_context.get("recipes") or []
+        image_evidence = [
+            item for item in evidence if item.get("media_type", "").startswith("image/")
+        ]
+        occurrence_type: Literal[
+            "meal",
+            "drink",
+            "product",
+            "cream",
+            "medication",
+            "exercise",
+            "shower",
+            "washing",
+            "swimming",
+            "other",
+        ]
+        if re.search(r"\b(shower|showered)\b", lowered):
+            occurrence_type = "shower"
+        elif re.search(r"\b(swim|swam|swimming)\b", lowered):
+            occurrence_type = "swimming"
+        elif re.search(r"\b(run|ran|exercise|workout|gym|sport)\b", lowered):
+            occurrence_type = "exercise"
+        elif re.search(r"\b(cream|ointment|lotion|moistur)\w*\b", lowered):
+            occurrence_type = "cream"
+        elif re.search(r"\b(medicine|medication|tablet|pill)\b", lowered):
+            occurrence_type = "medication"
+        elif re.search(r"\b(drank|drink|coffee|tea|juice|water)\b", lowered):
+            occurrence_type = "drink"
+        else:
+            occurrence_type = "meal" if image_evidence or recipes or text else "other"
+        fallback = recipes[0].get("name") if recipes and occurrence_type == "meal" else None
+        label = (text[:240] or fallback or occurrence_type.replace("_", " ").title()).strip()
+        return QuickLogSynthesis(
+            occurrence_type=occurrence_type,
+            name=label,
+            ingredients=[
+                QuickLogIngredient(name=str(name), evidence="Leading saved recipe candidate")
+                for name in ((recipes[0].get("ingredients") if recipes and not text else []) or [])
+            ],
+            prepared_by_user=(
+                bool(re.search(r"\b(cooked|made|prepared|chopped|baked)\b", lowered))
+                if occurrence_type == "meal"
+                else None
+            ),
+            skin_contact=QuickLogContact(mode="unknown"),
+            image_roles=[
+                QuickLogImageRole(artifact_order=int(item["artifact_order"]), role="unclassified")
+                for item in image_evidence
+            ],
+            warnings=["Development mode cannot inspect images; confirm or correct every card."]
+            if image_evidence
+            else [],
+        )
+
+    def refine_quick_log(
+        self,
+        review_fields: dict[str, Any],
+        correction: str,
+    ) -> QuickLogRefinement:
+        lowered = correction.lower().strip()
+        updates: list[QuickLogFieldUpdate] = []
+        if "occurrence_type" in review_fields:
+            for value in (
+                "meal",
+                "drink",
+                "product",
+                "cream",
+                "medication",
+                "exercise",
+                "shower",
+                "washing",
+                "swimming",
+                "other",
+            ):
+                if re.search(rf"\b{value}\b", lowered):
+                    updates.append(
+                        QuickLogFieldUpdate(field_key="occurrence_type", proposed_value=value)
+                    )
+                    break
+        identity_match = re.search(r"(?:called|named|it was|this is)\s+(.+)$", correction, re.I)
+        if identity_match and "identity" in review_fields:
+            current = dict(review_fields["identity"] or {})
+            current.update({"name": identity_match.group(1).strip()[:240], "mode": "new"})
+            updates.append(QuickLogFieldUpdate(field_key="identity", proposed_value=current))
+        if "no skin contact" in lowered and "preparation_contact" in review_fields:
+            current = dict(review_fields["preparation_contact"] or {})
+            current["skin_contact"] = {"mode": "none", "items": [], "body_areas": []}
+            updates.append(
+                QuickLogFieldUpdate(field_key="preparation_contact", proposed_value=current)
+            )
+        return QuickLogRefinement(updates=updates)
+
 
 class OpenAIExtractionProvider(ExtractionProvider):
     name = "openai"
@@ -326,6 +465,71 @@ class OpenAIExtractionProvider(ExtractionProvider):
         )
         if response.output_parsed is None:
             raise RuntimeError("The capture model returned no validated proposal")
+        return response.output_parsed
+
+    def synthesize_quick_log(
+        self,
+        evidence: list[dict[str, Any]],
+        knowledge_context: dict[str, Any],
+    ) -> QuickLogSynthesis:
+        content_parts: list[dict[str, Any]] = [
+            {
+                "type": "input_text",
+                "text": (
+                    "Evidence index and text/transcripts:\n"
+                    + str(
+                        [
+                            {key: value for key, value in item.items() if key != "content"}
+                            for item in evidence
+                        ]
+                    )
+                    + "\nPrivate saved-item candidates (ranking context only):\n"
+                    + str(knowledge_context)
+                ),
+            }
+        ]
+        for item in evidence:
+            content = item.get("content")
+            media_type = str(item.get("media_type") or "")
+            if content is None or not media_type.startswith("image/"):
+                continue
+            encoded = base64.b64encode(content).decode("ascii")
+            content_parts.append(
+                {
+                    "type": "input_text",
+                    "text": f"Image artifact_order={item.get('artifact_order')}",
+                }
+            )
+            content_parts.append(
+                {
+                    "type": "input_image",
+                    "image_url": f"data:{media_type};base64,{encoded}",
+                    "detail": "high",
+                }
+            )
+        response = self.client.responses.parse(
+            model=self.capture_model,
+            instructions=QUICK_LOG_INSTRUCTIONS,
+            input=cast("ResponseInputParam", [{"role": "user", "content": content_parts}]),
+            text_format=QuickLogSynthesis,
+        )
+        if response.output_parsed is None:
+            raise RuntimeError("The Quick Log model returned no validated proposal")
+        return response.output_parsed
+
+    def refine_quick_log(
+        self,
+        review_fields: dict[str, Any],
+        correction: str,
+    ) -> QuickLogRefinement:
+        response = self.client.responses.parse(
+            model=self.capture_model,
+            instructions=QUICK_LOG_REFINEMENT_INSTRUCTIONS,
+            input=f"Current review fields:\n{review_fields}\n\nUser correction:\n{correction}",
+            text_format=QuickLogRefinement,
+        )
+        if response.output_parsed is None:
+            raise RuntimeError("The Quick Log refinement model returned no validated updates")
         return response.output_parsed
 
 

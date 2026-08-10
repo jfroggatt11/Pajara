@@ -270,7 +270,10 @@ class Worker:
         }.get(activity_type, set())
 
     async def _extract_capture(self, job: dict[str, Any]) -> dict[str, Any]:
-        if job["payload"].get("mode", "activity") == "food_label":
+        mode = job["payload"].get("mode", "activity")
+        if mode == "quick_log":
+            return await self._process_quick_log(job)
+        if mode == "food_label":
             return await self._extract_food_label_capture(job)
 
         capture_id = job["payload"]["capture_session_id"]
@@ -425,6 +428,406 @@ class Worker:
             "capture_session_id": capture_id,
             "proposal_count": len(personalized.activities),
             "candidate_count": candidate_count,
+        }
+
+    @staticmethod
+    def _quick_log_required_fields(occurrence_type: str, multiple: bool) -> list[str]:
+        required = ["date_time", "occurrence_type", "identity"]
+        if occurrence_type in {"meal", "drink"}:
+            required.extend(["meal_contents", "preparation_contact"])
+        elif occurrence_type in {"product", "cream", "medication"}:
+            required.extend(["product_details", "skin_contact"])
+        else:
+            required.extend(["activity_products", "skin_contact"])
+        if multiple:
+            required.insert(0, "occurrence_choice")
+        return required
+
+    @staticmethod
+    def _valid_quick_log_field(field_key: str, value: Any) -> bool:
+        if field_key == "occurrence_type":
+            return value in {
+                "meal",
+                "drink",
+                "product",
+                "cream",
+                "medication",
+                "exercise",
+                "shower",
+                "washing",
+                "swimming",
+                "other",
+            }
+        if field_key == "date_time":
+            return isinstance(value, dict) and bool(value.get("occurred_at"))
+        if field_key == "occurrence_choice":
+            return isinstance(value, dict) and bool(value.get("selected"))
+        return isinstance(value, dict)
+
+    async def _process_quick_log(self, job: dict[str, Any]) -> dict[str, Any]:
+        capture_id = job["payload"]["capture_session_id"]
+        rows = await self.client.select(
+            "capture_sessions", query=f"select=*&id=eq.{capture_id}&limit=1"
+        )
+        if not rows:
+            raise ValueError("Capture session does not exist")
+        capture = rows[0]
+        operation = job["payload"].get("operation", "synthesize")
+        await self.client.update(
+            "capture_sessions",
+            f"id=eq.{capture_id}",
+            {
+                "status": "processing",
+                "provider": self.provider.name,
+                "model": getattr(self.provider, "capture_model", self.provider.model),
+                "prompt_version": "quick-log-v1",
+            },
+        )
+
+        if operation == "refine":
+            message_id = job["payload"].get("correction_message_id")
+            messages = await self.client.select(
+                "capture_messages",
+                query=(f"select=*&id=eq.{message_id}&capture_session_id=eq.{capture_id}&limit=1"),
+            )
+            if not messages:
+                raise ValueError("Correction message does not exist")
+            correction_text = str(messages[0]["text_content"])
+            if (
+                messages[0].get("artifact_id")
+                and (messages[0].get("provenance") or {}).get("transcription")
+                == "backend_requested"
+            ):
+                artifacts = await self.client.select(
+                    "artifacts",
+                    query=f"select=*&id=eq.{messages[0]['artifact_id']}&limit=1",
+                )
+                if not artifacts:
+                    raise ValueError("Correction voice artifact does not exist")
+                artifact = artifacts[0]
+                content = await self.client.download(artifact["bucket"], artifact["object_path"])
+                correction_text = (
+                    await asyncio.to_thread(
+                        self.provider.transcribe,
+                        artifact.get("original_filename") or "voice-correction",
+                        artifact["media_type"],
+                        content,
+                    )
+                ).strip()
+                await self.client.update(
+                    "capture_messages",
+                    f"id=eq.{messages[0]['id']}",
+                    {
+                        "text_content": correction_text,
+                        "provenance": {"method": "transcribed", "fallback": "backend"},
+                    },
+                )
+            fields = await self.client.select(
+                "capture_review_fields",
+                query=f"select=*&capture_session_id=eq.{capture_id}",
+            )
+            proposed = {str(field["field_key"]): field["proposed_value"] for field in fields}
+            refinement = await asyncio.to_thread(
+                self.provider.refine_quick_log,
+                proposed,
+                correction_text,
+            )
+            changed: list[str] = []
+            existing = {str(field["field_key"]): field for field in fields}
+            for update in refinement.updates:
+                current = existing.get(update.field_key)
+                if current is None or not self._valid_quick_log_field(
+                    update.field_key, update.proposed_value
+                ):
+                    continue
+                if current.get("proposed_value") == update.proposed_value:
+                    continue
+                await self.client.update(
+                    "capture_review_fields",
+                    f"id=eq.{current['id']}",
+                    {
+                        "proposed_value": update.proposed_value,
+                        "confirmed_value": None,
+                        "confirmation_state": "unconfirmed",
+                        "provenance": {
+                            "method": "ai_refinement",
+                            "message_id": message_id,
+                            "explanation": update.explanation,
+                        },
+                    },
+                )
+                changed.append(update.field_key)
+            final_fields = {
+                **proposed,
+                **{
+                    update.field_key: update.proposed_value
+                    for update in refinement.updates
+                    if update.field_key in existing
+                    and self._valid_quick_log_field(update.field_key, update.proposed_value)
+                },
+            }
+            final_type = str(final_fields.get("occurrence_type") or "other")
+            required = self._quick_log_required_fields(
+                final_type, "occurrence_choice" in final_fields
+            )
+            date_time = final_fields.get("date_time")
+            capture_update: dict[str, Any] = {
+                "status": "ready",
+                "error": None,
+                "attributes": {
+                    **(capture.get("attributes") or {}),
+                    "required_review_fields": required,
+                },
+            }
+            if isinstance(date_time, dict) and date_time.get("occurred_at"):
+                capture_update["occurred_at"] = date_time["occurred_at"]
+                capture_update["recorded_timezone"] = (
+                    date_time.get("timezone") or capture["recorded_timezone"]
+                )
+            await self.client.update("capture_sessions", f"id=eq.{capture_id}", capture_update)
+            return {"capture_session_id": capture_id, "updated_fields": changed}
+
+        links = await self.client.select(
+            "capture_artifacts",
+            query=f"select=*&capture_session_id=eq.{capture_id}&order=display_order.asc",
+        )
+        evidence: list[dict[str, Any]] = []
+        messages = await self.client.select(
+            "capture_messages",
+            query=f"select=*&capture_session_id=eq.{capture_id}&order=message_order.asc",
+        )
+        next_message_order = 1 + max(
+            [int(message.get("message_order", 0)) for message in messages] or [-1]
+        )
+        transcript_by_artifact = {
+            str(message.get("artifact_id")): str(message["text_content"])
+            for message in messages
+            if message.get("message_kind") == "voice_transcript" and message.get("artifact_id")
+        }
+        for link in links:
+            artifacts = await self.client.select(
+                "artifacts", query=f"select=*&id=eq.{link['artifact_id']}&limit=1"
+            )
+            if not artifacts:
+                raise ValueError("Capture artifact does not exist")
+            artifact = artifacts[0]
+            content = await self.client.download(artifact["bucket"], artifact["object_path"])
+            item: dict[str, Any] = {
+                "artifact_id": artifact["id"],
+                "artifact_order": int(link["display_order"]),
+                "role": link["artifact_role"],
+                "media_type": artifact["media_type"],
+                "filename": artifact.get("original_filename"),
+            }
+            if str(artifact["media_type"]).startswith("audio/"):
+                transcript = transcript_by_artifact.get(str(artifact["id"]))
+                if not transcript:
+                    transcript = (
+                        await asyncio.to_thread(
+                            self.provider.transcribe,
+                            artifact.get("original_filename") or "voice-note",
+                            artifact["media_type"],
+                            content,
+                        )
+                    ).strip()
+                    await self.client.insert(
+                        "capture_messages",
+                        {
+                            "user_id": job["user_id"],
+                            "capture_session_id": capture_id,
+                            "author": "user",
+                            "message_kind": "voice_transcript",
+                            "text_content": transcript,
+                            "artifact_id": artifact["id"],
+                            "message_order": next_message_order,
+                            "provenance": {"method": "transcribed"},
+                        },
+                    )
+                    next_message_order += 1
+                item["text"] = transcript
+            elif str(artifact["media_type"]).startswith("image/"):
+                item["content"] = content
+            evidence.append(item)
+        if capture.get("original_text"):
+            evidence.append(
+                {"artifact_order": -1, "media_type": "text/plain", "text": capture["original_text"]}
+            )
+        for message in messages:
+            if message.get("message_kind") in {"text", "correction"}:
+                evidence.append(
+                    {
+                        "artifact_order": -1,
+                        "media_type": "text/plain",
+                        "text": message["text_content"],
+                    }
+                )
+        if not evidence:
+            raise ValueError("Quick Log needs a photo, voice note or typed context")
+
+        synthesis = await asyncio.to_thread(self.provider.synthesize_quick_log, evidence, {})
+        recipe_context = await self._recipe_context(job["user_id"])
+        concept_context = await self._concept_context(job["user_id"])
+        query_text = f"{synthesis.name} {' '.join(item.name for item in synthesis.ingredients)}"
+        candidates: list[dict[str, Any]] = []
+        if synthesis.occurrence_type in {"meal", "drink"}:
+            ranked = sorted(
+                [
+                    (
+                        self._match_score(
+                            query_text,
+                            f"{candidate['name']} {' '.join(candidate.get('ingredients', []))}",
+                        ),
+                        candidate,
+                    )
+                    for candidate in recipe_context
+                ],
+                key=lambda item: item[0],
+                reverse=True,
+            )[:8]
+            candidates = [{**candidate, "score": score} for score, candidate in ranked]
+            candidate_kind = "recipe"
+        else:
+            allowed_types = {
+                "product": {"product", "treatment"},
+                "cream": {"treatment", "product"},
+                "medication": {"medication"},
+                "exercise": {"activity"},
+                "shower": {"activity"},
+                "washing": {"activity"},
+                "swimming": {"activity"},
+                "other": {"activity"},
+            }.get(synthesis.occurrence_type, set())
+            ranked = sorted(
+                [
+                    (self._match_score(synthesis.name, str(candidate["name"])), candidate)
+                    for candidate in concept_context
+                    if candidate["concept_type"] in allowed_types
+                ],
+                key=lambda item: item[0],
+                reverse=True,
+            )[:8]
+            candidates = [{**candidate, "score": score} for score, candidate in ranked]
+            candidate_kind = "concept"
+
+        top = candidates[0] if candidates and float(candidates[0]["score"]) >= 0.35 else None
+        image_roles = [role.role for role in synthesis.image_roles]
+        document_only = (
+            bool(image_roles)
+            and all(
+                role in {"ingredient_label", "product_front", "recipe_document"}
+                for role in image_roles
+            )
+            and not any(item.get("text") for item in evidence)
+        )
+        identity = {
+            "name": top["name"] if top else synthesis.name,
+            "generic_name": synthesis.name,
+            "mode": "existing" if top else "new",
+            "candidate_kind": candidate_kind,
+            "selected": top,
+            "alternatives": candidates,
+            **({"document_relationship": synthesis.document_relationship} if document_only else {}),
+        }
+        contact = synthesis.skin_contact.model_dump(mode="json")
+        activity_products: list[dict[str, Any]] = []
+        for product_name in synthesis.products:
+            product_matches = sorted(
+                [
+                    (self._match_score(product_name, str(candidate["name"])), candidate)
+                    for candidate in concept_context
+                    if candidate["concept_type"] in {"product", "treatment"}
+                ],
+                key=lambda item: item[0],
+                reverse=True,
+            )
+            product_match = (
+                product_matches[0][1] if product_matches and product_matches[0][0] >= 0.35 else None
+            )
+            activity_products.append({"name": product_name, "selected": product_match})
+        proposed_fields: dict[str, Any] = {
+            "date_time": {
+                "occurred_at": capture["occurred_at"],
+                "timezone": capture["recorded_timezone"],
+            },
+            "occurrence_type": synthesis.occurrence_type,
+            "identity": identity,
+            "meal_contents": {
+                "ingredients": [item.model_dump(mode="json") for item in synthesis.ingredients],
+                "subrecipes": [],
+                "leftovers": [],
+            },
+            "preparation_contact": {
+                "prepared_by_user": synthesis.prepared_by_user,
+                "skin_contact": contact,
+            },
+            "product_details": {
+                "ingredients": [item.model_dump(mode="json") for item in synthesis.ingredients],
+                "action": synthesis.action or synthesis.occurrence_type,
+            },
+            "activity_products": {"products": activity_products},
+            "skin_contact": contact,
+        }
+        if synthesis.possible_occurrences:
+            proposed_fields["occurrence_choice"] = {
+                "selected": None,
+                "choices": synthesis.possible_occurrences,
+            }
+
+        required = self._quick_log_required_fields(
+            synthesis.occurrence_type, bool(synthesis.possible_occurrences)
+        )
+        await self.client.delete("capture_review_fields", f"capture_session_id=eq.{capture_id}")
+        evidence_references = [
+            {
+                "artifact_id": item.get("artifact_id"),
+                "artifact_order": item.get("artifact_order"),
+                "media_type": item.get("media_type"),
+            }
+            for item in evidence
+            if item.get("artifact_id")
+        ]
+        for field_key, proposed_value in proposed_fields.items():
+            await self.client.insert(
+                "capture_review_fields",
+                {
+                    "user_id": job["user_id"],
+                    "capture_session_id": capture_id,
+                    "field_key": field_key,
+                    "proposed_value": proposed_value,
+                    "evidence": evidence_references,
+                    "provenance": {
+                        "method": "multimodal_synthesis",
+                        "prompt_version": "quick-log-v1",
+                        "provider": self.provider.name,
+                        "model": getattr(self.provider, "capture_model", self.provider.model),
+                    },
+                },
+            )
+        for role in synthesis.image_roles:
+            await self.client.update(
+                "capture_artifacts",
+                f"capture_session_id=eq.{capture_id}&display_order=eq.{role.artifact_order}",
+                {
+                    "artifact_role": role.role,
+                    "interpretation": {"evidence": role.evidence},
+                    "provenance": {"method": "multimodal_synthesis"},
+                },
+            )
+        attributes = {
+            **(capture.get("attributes") or {}),
+            "required_review_fields": required,
+            "quick_log_warnings": synthesis.warnings,
+            "possible_occurrences": synthesis.possible_occurrences,
+        }
+        await self.client.update(
+            "capture_sessions",
+            f"id=eq.{capture_id}",
+            {"status": "ready", "attributes": attributes, "error": None},
+        )
+        return {
+            "capture_session_id": capture_id,
+            "review_field_count": len(proposed_fields),
+            "candidate_count": len(candidates),
         }
 
     async def _extract_food_label_capture(self, job: dict[str, Any]) -> dict[str, Any]:

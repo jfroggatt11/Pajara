@@ -190,7 +190,7 @@ export interface FoodBatch {
 
 export interface CaptureSession {
   id: string;
-  source_type: "photo" | "voice" | "text" | "manual" | "import";
+  source_type: "photo" | "voice" | "text" | "manual" | "import" | "mixed";
   artifact_id: string | null;
   occurred_at: string;
   recorded_timezone: string;
@@ -199,6 +199,17 @@ export interface CaptureSession {
   status: "draft" | "queued" | "processing" | "ready" | "confirmed" | "failed" | "discarded";
   error: string | null;
   attributes: Record<string, unknown>;
+}
+
+export interface CaptureReviewField {
+  id: string;
+  capture_session_id: string;
+  field_key: string;
+  proposed_value: unknown;
+  confirmed_value: unknown | null;
+  confirmation_state: "unconfirmed" | "confirmed";
+  evidence: unknown[];
+  provenance: Record<string, unknown>;
 }
 
 export interface CaptureIngredientGuess {

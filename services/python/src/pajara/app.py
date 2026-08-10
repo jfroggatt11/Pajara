@@ -206,13 +206,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         client = _user_client(active_settings, user.token)
         await _require_ai_enabled(client)
         capture = await ensure_owned(client, "capture_sessions", request.capture_session_id)
-        if capture.get("status") not in {"draft", "failed"}:
+        allowed_states = {"ready"} if request.operation == "refine" else {"draft", "failed"}
+        if capture.get("status") not in allowed_states:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Capture is already being processed or reviewed",
             )
+        if request.operation == "refine" and request.correction_message_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A correction message is required for refinement",
+            )
         if capture.get("artifact_id"):
             await ensure_owned(client, "artifacts", UUID(str(capture["artifact_id"])))
+        if request.mode == "quick_log":
+            links = await client.select(
+                "capture_artifacts",
+                query=(
+                    "select=artifact_id&capture_session_id=eq."
+                    f"{request.capture_session_id}&order=display_order.asc"
+                ),
+            )
+            image_count = 0
+            voice_count = 0
+            for link in links:
+                artifact = await ensure_owned(client, "artifacts", UUID(str(link["artifact_id"])))
+                media_type = str(artifact.get("media_type") or "")
+                if media_type.startswith("image/"):
+                    image_count += 1
+                elif media_type.startswith("audio/"):
+                    voice_count += 1
+            if image_count > 8 or voice_count > 4:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Quick Log supports up to 8 images and 4 voice notes",
+                )
+            if request.correction_message_id:
+                message = await ensure_owned(
+                    client, "capture_messages", request.correction_message_id
+                )
+                if str(message.get("capture_session_id")) != str(request.capture_session_id):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Record not found",
+                    )
         await client.update(
             "capture_sessions",
             f"id=eq.{request.capture_session_id}",

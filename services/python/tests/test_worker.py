@@ -223,6 +223,88 @@ class CaptureExtractionClient:
         return []
 
 
+class QuickLogRefinementClient:
+    def __init__(self) -> None:
+        self.updates: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def select(self, table: str, query: str = "") -> list[dict[str, Any]]:
+        if table == "capture_sessions":
+            return [
+                {
+                    "id": "quick-one",
+                    "status": "ready",
+                    "recorded_timezone": "Europe/Rome",
+                    "attributes": {
+                        "required_review_fields": [
+                            "date_time",
+                            "occurrence_type",
+                            "identity",
+                            "meal_contents",
+                            "preparation_contact",
+                        ]
+                    },
+                }
+            ]
+        if table == "capture_messages":
+            return [
+                {
+                    "id": "message-one",
+                    "capture_session_id": "quick-one",
+                    "text_content": "It was named Tomato pasta and there was no skin contact",
+                    "artifact_id": None,
+                    "provenance": {"method": "typed"},
+                }
+            ]
+        if table == "capture_review_fields":
+            return [
+                {
+                    "id": "date-field",
+                    "field_key": "date_time",
+                    "proposed_value": {
+                        "occurred_at": "2026-08-10T12:00:00Z",
+                        "timezone": "Europe/Rome",
+                    },
+                    "confirmation_state": "confirmed",
+                },
+                {
+                    "id": "type-field",
+                    "field_key": "occurrence_type",
+                    "proposed_value": "meal",
+                    "confirmation_state": "confirmed",
+                },
+                {
+                    "id": "identity-field",
+                    "field_key": "identity",
+                    "proposed_value": {"name": "Pasta", "mode": "new"},
+                    "confirmation_state": "confirmed",
+                },
+                {
+                    "id": "contents-field",
+                    "field_key": "meal_contents",
+                    "proposed_value": {"ingredients": [{"name": "Pasta"}]},
+                    "confirmation_state": "confirmed",
+                },
+                {
+                    "id": "contact-field",
+                    "field_key": "preparation_contact",
+                    "proposed_value": {
+                        "prepared_by_user": True,
+                        "skin_contact": {
+                            "mode": "direct",
+                            "items": ["tomato"],
+                            "body_areas": ["both_hands"],
+                        },
+                    },
+                    "confirmation_state": "confirmed",
+                },
+            ]
+        raise AssertionError(f"Unexpected select table: {table} ({query})")
+
+    async def update(self, table: str, query: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        self.updates.append((table, query, payload))
+        return []
+
+
 async def test_run_once_claims_and_processes_one_job() -> None:
     job = {"id": "job-one", "job_type": "analysis"}
     worker = RecordingWorker([job])
@@ -334,3 +416,34 @@ async def test_voice_capture_ranks_saved_medicine_and_treatment_candidates() -> 
     )
     assert capture_client.updates[-1][2]["status"] == "ready"
     assert result["candidate_count"] == 2
+
+
+async def test_quick_log_refinement_invalidates_only_changed_cards() -> None:
+    worker = object.__new__(Worker)
+    worker.settings = Settings()
+    refinement_client = QuickLogRefinementClient()
+    worker.client = cast(SupabaseClient, refinement_client)
+    worker.provider = FakeExtractionProvider()
+
+    result = await worker._extract_capture(
+        {
+            "user_id": "user-one",
+            "payload": {
+                "capture_session_id": "quick-one",
+                "mode": "quick_log",
+                "operation": "refine",
+                "correction_message_id": "message-one",
+            },
+        }
+    )
+
+    field_updates = [
+        (query, payload)
+        for table, query, payload in refinement_client.updates
+        if table == "capture_review_fields"
+    ]
+    assert result["updated_fields"] == ["identity", "preparation_contact"]
+    assert len(field_updates) == 2
+    assert all(payload["confirmation_state"] == "unconfirmed" for _, payload in field_updates)
+    assert all(payload["confirmed_value"] is None for _, payload in field_updates)
+    assert not any("date-field" in query or "contents-field" in query for query, _ in field_updates)

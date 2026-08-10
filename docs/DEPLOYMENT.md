@@ -42,10 +42,13 @@ arguments, or the frontend.
    `202607290004_editable_catalogue_recipes.sql` are present. Also confirm that
    `202607310001_save_meal_as_recipe.sql` and
    `202608070001_activity_food_ontology.sql` are listed as pending before approving the push.
+   For the conversational Quick Log, also confirm
+   `202608100001_quick_log_conversation.sql` is pending and is applied last.
    They add versioned saved items, preserve manual data during image review, add editable
    recipes/variations, migrate recipes into the food/activity ontology, and transactionally
-   convert confirmed photo or voice captures into linked activity events. Existing logs and
-   their legacy version links are retained.
+   convert confirmed photo or voice captures into linked activity events, then add ordered
+   mixed-media drafts, card-by-card review, and atomic final confirmation. Existing logs,
+   captures, and their legacy artifact/version links are retained and backfilled additively.
 
 5. In Authentication:
    - set the initial Site URL to the eventual Netlify production URL;

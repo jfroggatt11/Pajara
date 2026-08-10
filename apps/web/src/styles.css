@@ -31,6 +31,8 @@ p { line-height: 1.55; }
 .sidebar nav { display: grid; gap: 5px; }
 .sidebar nav button { border: 0; border-radius: 12px; padding: 11px 13px; background: transparent; color: #dce9e4; text-align: left; }
 .sidebar nav button:hover, .sidebar nav button.active { background: #2d5751; color: white; }
+.sidebar nav button.quick-log-nav { color: #2c281e; background: var(--peach); font-weight: 800; }
+.sidebar nav button.quick-log-nav:hover, .sidebar nav button.quick-log-nav.active { background: #ffc895; color: #2c281e; }
 .sidebar-note { margin-top: auto; padding: 12px 8px 0; font-size: .8rem; color: #abc7bd; }
 .content { min-width: 0; }
 .page { max-width: 1080px; margin: 0 auto; padding: 52px 5vw 90px; }
@@ -364,6 +366,34 @@ details textarea { margin-top: 10px; }
   flex: 1;
   background: var(--line);
 }
+.manual-entry-button { display: block; margin: 0 auto 24px; }
+.manual-log-form { margin-top: 0; }
+.conversational-log { padding: clamp(18px, 4vw, 32px); }
+.resume-capture { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 14px; background: #fff0d8; }
+.resume-capture div:first-child { display: grid; gap: 4px; }
+.resume-capture small { color: var(--muted); }
+.quick-capture-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.capture-action { min-height: 82px; display: grid; place-items: center; text-align: center; }
+label.capture-action { cursor: pointer; }
+.capture-action input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.mixed-evidence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.evidence-tile { display: grid; gap: 8px; align-content: start; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: #f8f6ef; }
+.evidence-tile img, .voice-evidence { width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; object-fit: cover; background: #e5eee9; }
+.voice-evidence { display: grid; place-items: center; color: var(--forest); font-weight: 700; }
+.status-pill.uploading { background: #fff0d8; color: #805115; }
+.status-pill.error { background: #f6dcda; color: #85372c; }
+.compact-stack { gap: 12px; }
+.review-card { background: #f8f6ef; }
+.review-card.confirmed { border-color: #8db5a6; background: #f0f7f3; }
+.review-card h3, .save-summary h3 { margin: 0; }
+.review-card .section-heading { margin-bottom: 4px; }
+.full-width { grid-column: 1 / -1; }
+.composer-card { position: sticky; bottom: 12px; z-index: 3; padding: 16px; border: 1px solid #9cb6ad; border-radius: 18px; background: #fffdf8ee; box-shadow: 0 12px 35px #17302d1c; backdrop-filter: blur(12px); }
+.composer-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; }
+.save-summary { display: grid; gap: 8px; padding: 22px; border-radius: 18px; background: var(--forest); color: white; }
+.save-summary p { margin: 0; color: #d8e7e2; }
+.save-summary small { color: #abc7bd; }
+.save-occurrence { justify-self: start; }
 .recipe-library { padding: 26px 0 38px; border-bottom: 1px solid var(--line); }
 .recipe-editor { margin: 18px 0 24px; }
 .recipe-components-editor { gap: 12px; }
@@ -407,6 +437,8 @@ details textarea { margin-top: 10px; }
   .mobile-nav { position: fixed; z-index: 10; bottom: 0; left: 0; right: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(74px, 1fr); overflow-x: auto; padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)); background: #fffdf8f5; border-top: 1px solid var(--line); backdrop-filter: blur(16px); }
   .mobile-nav button { border: 0; background: transparent; padding: 9px 3px; color: var(--muted); font-size: .68rem; white-space: nowrap; }
   .mobile-nav button.active { color: var(--forest); font-weight: 700; }
+  .mobile-nav button.quick-log-nav { margin: 0 2px; border-radius: 12px; background: var(--peach); color: #2c281e; font-weight: 800; }
+  .quick-capture-actions, .composer-row { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

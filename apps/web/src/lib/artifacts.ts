@@ -93,6 +93,70 @@ export async function uploadCaptureArtifact(
   );
 }
 
+export async function uploadQuickLogArtifact(
+  session: Session,
+  captureId: string,
+  file: File,
+  displayOrder: number,
+): Promise<string> {
+  const voice = inferMediaType(file).startsWith("audio/");
+  const artifactId = await storeArtifact(
+    session,
+    captureId,
+    file,
+    voice ? "voice-originals" : "input-originals",
+    voice ? "voice_note" : "capture_input",
+  );
+  const {error: linkError} = await supabase.from("capture_artifacts").insert({
+    user_id: session.user.id,
+    capture_session_id: captureId,
+    artifact_id: artifactId,
+    artifact_role: voice ? "voice_note" : "unclassified",
+    display_order: displayOrder,
+    provenance: {method: "user_capture"},
+  });
+  if (linkError) throw linkError;
+  if (displayOrder === 0) {
+    const {error: compatibilityError} = await supabase
+      .from("capture_sessions")
+      .update({artifact_id: artifactId})
+      .eq("id", captureId)
+      .is("artifact_id", null);
+    if (compatibilityError) throw compatibilityError;
+  }
+  return artifactId;
+}
+
+export async function removeQuickLogArtifact(
+  captureId: string,
+  artifactId: string,
+): Promise<void> {
+  const {data: artifact, error: readError} = await supabase
+    .from("artifacts")
+    .select("bucket,object_path")
+    .eq("id", artifactId)
+    .single();
+  if (readError) throw readError;
+  const {error: compatibilityError} = await supabase
+    .from("capture_sessions")
+    .update({artifact_id: null})
+    .eq("id", captureId)
+    .eq("artifact_id", artifactId);
+  if (compatibilityError) throw compatibilityError;
+  const {error: linkError} = await supabase
+    .from("capture_artifacts")
+    .delete()
+    .eq("capture_session_id", captureId)
+    .eq("artifact_id", artifactId);
+  if (linkError) throw linkError;
+  const {error: artifactError} = await supabase.from("artifacts").delete().eq("id", artifactId);
+  if (artifactError) throw artifactError;
+  const {error: storageError} = await supabase.storage
+    .from(artifact.bucket as "input-originals" | "voice-originals")
+    .remove([artifact.object_path as string]);
+  if (storageError) throw storageError;
+}
+
 export async function uploadArtifact(
   session: Session,
   eventId: string,

@@ -55,7 +55,29 @@ await database.exec(`
   $$;
 `);
 
-for (const migration of migrations) await database.exec(migration);
+const backfillUser = "00000000-0000-4000-8000-000000000099";
+const backfillCapture = "60000000-0000-4000-8000-000000000099";
+const backfillArtifact = "30000000-0000-4000-8000-000000000099";
+for (const [index, migration] of migrations.entries()) {
+  if (migrationFiles[index] === "202608100001_quick_log_conversation.sql") {
+    await database.exec(`
+      insert into auth.users (id) values ('${backfillUser}');
+      insert into public.artifacts (
+        id, user_id, bucket, object_path, media_type, byte_size, artifact_kind
+      ) values (
+        '${backfillArtifact}', '${backfillUser}', 'input-originals',
+        '${backfillUser}/legacy/photo.jpg', 'image/jpeg', 1, 'meal_photo'
+      );
+      insert into public.capture_sessions (
+        id, user_id, source_type, artifact_id, occurred_at, recorded_timezone
+      ) values (
+        '${backfillCapture}', '${backfillUser}', 'photo', '${backfillArtifact}',
+        '2026-08-09T10:00:00Z', 'Europe/Rome'
+      );
+    `);
+  }
+  await database.exec(migration);
+}
 await database.exec(seed);
 
 async function scalar(query) {
@@ -93,6 +115,11 @@ const assertions = [
   ["versioned recipe save function", await scalar("select count(*) from pg_proc where proname = 'save_recipe_definition'"), 1],
   ["recipe flatten function", await scalar("select count(*) from pg_proc where proname = 'flatten_recipe_components'"), 1],
   ["activity bundle function", await scalar("select count(*) from pg_proc where proname = 'log_activity_bundle'"), 1],
+  ["Quick Log artifact table", await scalar("select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'capture_artifacts'"), 1],
+  ["Quick Log message table", await scalar("select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'capture_messages'"), 1],
+  ["Quick Log review table", await scalar("select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'capture_review_fields'"), 1],
+  ["atomic Quick Log function", await scalar("select count(*) from pg_proc where proname = 'confirm_quick_log_capture'"), 1],
+  ["existing capture artifact backfill", await scalar(`select count(*) from public.capture_artifacts where capture_session_id = '${backfillCapture}' and artifact_id = '${backfillArtifact}'`), 1],
 ];
 
 let failed = false;
@@ -110,6 +137,8 @@ const userB = "00000000-0000-4000-8000-000000000002";
 const userBConcept = "20000000-0000-4000-8000-000000000002";
 const userBFood = "50000000-0000-4000-8000-000000000002";
 const userBMealEvent = "10000000-0000-4000-8000-000000000002";
+const userBCapture = "60000000-0000-4000-8000-000000000002";
+const userBArtifact = "30000000-0000-4000-8000-000000000002";
 
 await database.exec(`
   insert into auth.users (id) values ('${userA}'), ('${userB}');
@@ -124,6 +153,19 @@ await database.exec(`
   ) values (
     '${userBMealEvent}', '${userB}', 'meal',
     '2026-07-29T07:00:00Z', 'Europe/Rome', 'trusted'
+  );
+  insert into public.artifacts (
+    id, user_id, bucket, object_path, media_type, byte_size, artifact_kind
+  ) values (
+    '${userBArtifact}', '${userB}', 'input-originals',
+    '${userB}/private/photo.jpg', 'image/jpeg', 1, 'capture_input'
+  );
+  insert into public.capture_sessions (
+    id, user_id, profile_id, source_type, occurred_at, recorded_timezone
+  ) values (
+    '${userBCapture}', '${userB}',
+    (select id from public.profiles where user_id = '${userB}'),
+    'mixed', '2026-08-10T10:00:00Z', 'Europe/Rome'
   );
   grant usage on schema public, storage, auth to authenticated;
   grant select, insert, update, delete on all tables in schema public to authenticated;
@@ -834,6 +876,152 @@ if (leftoverComponentCount === 1 && leftoverBatchUseCount === 1) {
 } else {
   failed = true;
   console.error(`FAIL leftover plan/event identity: ${leftoverComponentCount}/${leftoverBatchUseCount}`);
+}
+
+const quickCaptureId = "60000000-0000-4000-8000-000000000010";
+const quickArtifactId = "30000000-0000-4000-8000-000000000010";
+await database.exec(`
+  insert into public.artifacts (
+    id, user_id, bucket, object_path, media_type, byte_size, artifact_kind
+  ) values (
+    '${quickArtifactId}', '${userA}', 'input-originals',
+    '${userA}/${quickCaptureId}/meal.jpg', 'image/jpeg', 1, 'capture_input'
+  );
+  insert into public.capture_sessions (
+    id, user_id, profile_id, source_type, artifact_id, occurred_at,
+    recorded_timezone, status, attributes
+  ) values (
+    '${quickCaptureId}', '${userA}',
+    (select id from public.profiles where user_id = '${userA}'),
+    'mixed', '${quickArtifactId}', '2026-08-10T12:00:00Z', 'Europe/Rome', 'ready',
+    '{"required_review_fields":["date_time","occurrence_type","identity","meal_contents","preparation_contact"]}'::jsonb
+  );
+  insert into public.capture_artifacts (
+    user_id, capture_session_id, artifact_id, artifact_role, display_order
+  ) values ('${userA}', '${quickCaptureId}', '${quickArtifactId}', 'meal_photo', 0);
+  insert into public.capture_review_fields (
+    user_id, capture_session_id, field_key, proposed_value, confirmed_value,
+    confirmation_state
+  ) values
+    ('${userA}', '${quickCaptureId}', 'date_time', '{"occurred_at":"2026-08-10T12:00:00Z"}', '{"occurred_at":"2026-08-10T12:00:00Z"}', 'confirmed'),
+    ('${userA}', '${quickCaptureId}', 'occurrence_type', '"meal"', '"meal"', 'confirmed'),
+    ('${userA}', '${quickCaptureId}', 'identity', '{"name":"Quick soup","mode":"new"}', '{"name":"Quick soup","mode":"new"}', 'confirmed'),
+    ('${userA}', '${quickCaptureId}', 'meal_contents', '{"ingredients":[{"name":"Tomato"}]}', '{"ingredients":[{"name":"Tomato"}]}', 'confirmed'),
+    ('${userA}', '${quickCaptureId}', 'preparation_contact', '{"prepared_by_user":false,"skin_contact":{"mode":"none"}}', null, 'unconfirmed');
+`);
+
+if (
+  !(await expectDenied(
+    "Quick Log save before every card is confirmed",
+    `select public.confirm_quick_log_capture(
+      '${quickCaptureId}',
+      '{"mode":"new","name":"Quick soup","components":[{"name":"Tomato"}]}'::jsonb,
+      null,
+      '[{"type_code":"meal","label":"Quick soup","participants":[{"food_item_id":"$resolved_food_item_id","recipe_version_id":"$resolved_recipe_version_id","role":"consumed"}]}]'::jsonb
+    )`,
+  ))
+) {
+  failed = true;
+}
+
+await database.exec(`
+  update public.capture_review_fields
+  set confirmation_state = 'confirmed', confirmed_value = proposed_value
+  where capture_session_id = '${quickCaptureId}' and field_key = 'preparation_contact';
+  select public.confirm_quick_log_capture(
+    '${quickCaptureId}',
+    '{"mode":"new","name":"Quick soup","components":[{"name":"Tomato"}]}'::jsonb,
+    null,
+    '[{"type_code":"meal","label":"Quick soup","source_method":"mixed","participants":[{"food_item_id":"$resolved_food_item_id","recipe_version_id":"$resolved_recipe_version_id","role":"consumed"}]}]'::jsonb
+  );
+  select public.confirm_quick_log_capture(
+    '${quickCaptureId}', null, null,
+    '[{"type_code":"note","label":"must not duplicate"}]'::jsonb
+  );
+`);
+const quickLogAtomicCount = await scalar(`
+  select count(*) from public.events where capture_session_id = '${quickCaptureId}'
+`);
+const quickLogRecipeCount = await scalar(`
+  select count(*) from public.recipes where user_id = '${userA}' and name = 'Quick soup'
+`);
+const quickLogArtifactCount = await scalar(`
+  select count(*) from public.record_artifacts record
+  join public.events event on event.id = record.event_id
+  where event.capture_session_id = '${quickCaptureId}' and record.artifact_id = '${quickArtifactId}'
+`);
+if (quickLogAtomicCount === 1 && quickLogRecipeCount === 1 && quickLogArtifactCount === 1) {
+  console.log("PASS atomic and idempotent Quick Log confirmation: 1");
+} else {
+  failed = true;
+  console.error(
+    `FAIL atomic Quick Log confirmation: ${quickLogAtomicCount}/${quickLogRecipeCount}/${quickLogArtifactCount}`,
+  );
+}
+
+const productCaptureId = "60000000-0000-4000-8000-000000000011";
+await database.exec(`
+  insert into public.capture_sessions (
+    id, user_id, profile_id, source_type, occurred_at, recorded_timezone,
+    status, attributes
+  ) values (
+    '${productCaptureId}', '${userA}',
+    (select id from public.profiles where user_id = '${userA}'),
+    'mixed', '2026-08-10T13:00:00Z', 'Europe/Rome', 'ready',
+    '{"required_review_fields":["date_time","occurrence_type","identity","product_details","skin_contact"]}'::jsonb
+  );
+  insert into public.capture_review_fields (
+    user_id, capture_session_id, field_key, proposed_value, confirmed_value,
+    confirmation_state
+  ) values
+    ('${userA}', '${productCaptureId}', 'date_time', '{"occurred_at":"2026-08-10T13:00:00Z"}', '{"occurred_at":"2026-08-10T13:00:00Z"}', 'confirmed'),
+    ('${userA}', '${productCaptureId}', 'occurrence_type', '"cream"', '"cream"', 'confirmed'),
+    ('${userA}', '${productCaptureId}', 'identity', '{"name":"Quick cream","mode":"new"}', '{"name":"Quick cream","mode":"new"}', 'confirmed'),
+    ('${userA}', '${productCaptureId}', 'product_details', '{"action":"applied","ingredients":[{"name":"Water"}]}', '{"action":"applied","ingredients":[{"name":"Water"}]}', 'confirmed'),
+    ('${userA}', '${productCaptureId}', 'skin_contact', '{"mode":"direct","items":["Quick cream"],"body_areas":["both_hands"]}', '{"mode":"direct","items":["Quick cream"],"body_areas":["both_hands"]}', 'confirmed');
+  select public.confirm_quick_log_capture(
+    '${productCaptureId}', null,
+    '{"mode":"new","concept_type":"treatment","name":"Quick cream","ingredients":[{"name":"Water"}]}'::jsonb,
+    '[{"type_code":"topical_treatment","label":"Quick cream","source_method":"mixed","participants":[{"concept_id":"$resolved_concept_id","concept_version_id":"$resolved_concept_version_id","role":"applied"}]}]'::jsonb
+  );
+`);
+const quickProductCount = await scalar(`
+  select count(*) from public.event_concepts participant
+  join public.events event on event.id = participant.event_id
+  join public.concepts concept on concept.id = participant.concept_id
+  where event.capture_session_id = '${productCaptureId}'
+    and concept.canonical_name = 'Quick cream' and participant.role = 'applied'
+`);
+const quickProductContactCount = await scalar(`
+  select count(*) from public.event_concepts participant
+  join public.events event on event.id = participant.event_id
+  where event.capture_session_id = '${productCaptureId}'
+    and participant.role = 'contacted'
+    and participant.body_area_code = 'both_hands'
+    and participant.direct_contact = 'yes'
+`);
+if (quickProductCount === 1 && quickProductContactCount === 1) {
+  console.log("PASS new labelled product is versioned and logged atomically: 1");
+} else {
+  failed = true;
+  console.error(
+    `FAIL atomic Quick Log product save: ${quickProductCount}/${quickProductContactCount}`,
+  );
+}
+
+if (
+  !(await expectDenied(
+    "cross-tenant Quick Log artifact",
+    `
+      insert into public.capture_artifacts (
+        user_id, capture_session_id, artifact_id, artifact_role, display_order
+      ) values (
+        '${userA}', '${userBCapture}', '${userBArtifact}', 'unclassified', 0
+      )
+    `,
+  ))
+) {
+  failed = true;
 }
 
 if (

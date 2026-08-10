@@ -39,7 +39,9 @@ class CatalogueExtractionJobRequest(BaseModel):
 
 class CaptureExtractionJobRequest(BaseModel):
     capture_session_id: UUID
-    mode: Literal["activity", "food_label"] = "activity"
+    mode: Literal["activity", "food_label", "quick_log"] = "activity"
+    operation: Literal["synthesize", "refine"] = "synthesize"
+    correction_message_id: UUID | None = None
 
 
 class AnalysisJobRequest(BaseModel):
@@ -137,6 +139,70 @@ class ActivityCaptureProposal(BaseModel):
 class CaptureProposalBundle(BaseModel):
     activities: list[ActivityCaptureProposal] = Field(min_length=1, max_length=12)
     warnings: list[str] = Field(default_factory=list)
+
+
+class QuickLogIngredient(BaseModel):
+    name: str = Field(min_length=1, max_length=240)
+    evidence: str = Field(default="", max_length=500)
+
+
+class QuickLogImageRole(BaseModel):
+    artifact_order: int = Field(ge=0)
+    role: Literal[
+        "unclassified",
+        "meal_photo",
+        "ingredient_label",
+        "product_front",
+        "recipe_document",
+        "activity_photo",
+        "other",
+    ]
+    evidence: str = Field(default="", max_length=500)
+
+
+class QuickLogContact(BaseModel):
+    mode: Literal["none", "direct", "gloves", "unknown"] = "unknown"
+    items: list[str] = Field(default_factory=list)
+    body_areas: list[str] = Field(default_factory=list)
+
+
+class QuickLogSynthesis(BaseModel):
+    """One proposed occurrence synthesized from all capture evidence."""
+
+    occurrence_type: Literal[
+        "meal",
+        "drink",
+        "product",
+        "cream",
+        "medication",
+        "exercise",
+        "shower",
+        "washing",
+        "swimming",
+        "other",
+    ]
+    name: str = Field(min_length=1, max_length=240)
+    ingredients: list[QuickLogIngredient] = Field(default_factory=list)
+    prepared_by_user: bool | None = None
+    action: str | None = Field(default=None, max_length=240)
+    products: list[str] = Field(default_factory=list)
+    document_relationship: Literal[
+        "eaten_directly", "used_as_ingredient", "handled_or_applied", "unrelated", "unknown"
+    ] = "unknown"
+    skin_contact: QuickLogContact = Field(default_factory=QuickLogContact)
+    image_roles: list[QuickLogImageRole] = Field(default_factory=list)
+    possible_occurrences: list[str] = Field(default_factory=list, max_length=6)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class QuickLogFieldUpdate(BaseModel):
+    field_key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    proposed_value: Any
+    explanation: str = Field(default="Updated from your correction.", max_length=500)
+
+
+class QuickLogRefinement(BaseModel):
+    updates: list[QuickLogFieldUpdate] = Field(default_factory=list, max_length=12)
 
 
 class AnalysisResult(BaseModel):

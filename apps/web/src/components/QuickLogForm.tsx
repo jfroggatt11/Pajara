@@ -23,7 +23,7 @@ import type {
   Recipe,
   RecipeVersion,
 } from "../types";
-import {ActivityCaptureFlow} from "./ActivityCaptureFlow";
+import {ConversationalQuickLog} from "./ConversationalQuickLog";
 import {SaveMealAsRecipe} from "./SaveMealAsRecipe";
 import {StatusMessage} from "./StatusMessage";
 
@@ -96,6 +96,7 @@ export function QuickLogForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [recipeDraft, setRecipeDraft] = useState<RecipeDraft | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<
     "idle" | "loading" | "transcribing" | "ready" | "error"
   >("idle");
@@ -538,14 +539,18 @@ export function QuickLogForm({
         <div><span className="eyebrow">Fast capture</span><h1>Quick log</h1></div>
         <p>Start with a photo or voice note, review the closest matches, then confirm exactly what happened.</p>
       </header>
-      <ActivityCaptureFlow
+      <ConversationalQuickLog
         session={session}
         profile={profile}
         bodyAreas={bodyAreas}
         onSaved={onSaved}
+        onManual={() => setManualOpen(true)}
       />
-      <div className="manual-log-divider"><span>or use the detailed manual form</span></div>
-      <form className="stack card" onSubmit={submit}>
+      <div className="manual-log-divider"><span>Detailed fallback</span></div>
+      <button type="button" className="secondary manual-entry-button" onClick={() => setManualOpen((open) => !open)}>
+        {manualOpen ? "Hide manual entry" : "Enter manually"}
+      </button>
+      {manualOpen && <form className="stack card manual-log-form" onSubmit={submit}>
         <div className="form-grid activity-time-row">
           <label>
             When did it happen?
@@ -1124,7 +1129,7 @@ export function QuickLogForm({
         >
           {busy ? "Saving…" : "Save log"}
         </button>
-      </form>
+      </form>}
       {recipeDraft && (
         <SaveMealAsRecipe
           key={recipeDraft.mealEventId}

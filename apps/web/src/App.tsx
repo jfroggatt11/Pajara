@@ -16,8 +16,8 @@ import type {BodyArea, Profile, View} from "./types";
 
 const nav: Array<[View, string]> = [
   ["home", "Today"],
-  ["checkin", "Skin check"],
   ["log", "Quick log"],
+  ["checkin", "Skin check"],
   ["catalogue", "Saved items"],
   ["review", "Review"],
   ["timeline", "Timeline"],
@@ -72,7 +72,7 @@ export default function App() {
         <button className="brand" onClick={() => setView("home")}><span>P</span>Pajara</button>
         <nav aria-label="Primary">
           {nav.map(([value, label]) => (
-            <button className={view === value ? "active" : ""} onClick={() => setView(value)} key={value}>{label}</button>
+            <button className={`${view === value ? "active" : ""} ${value === "log" ? "quick-log-nav" : ""}`} onClick={() => setView(value)} key={value}>{label}</button>
           ))}
         </nav>
         <p className="sidebar-note">Patterns, not diagnoses.</p>
@@ -85,8 +85,8 @@ export default function App() {
               <h1>How is your skin,<br />{profile.display_name}?</h1>
               <p>Two minutes now makes later comparisons more reliable.</p>
               <div className="hero-actions">
-                <button className="primary" onClick={() => setView("checkin")}>Start skin check</button>
-                <button className="secondary" onClick={() => setView("log")}>Log an exposure</button>
+                <button className="primary quick-log-home" onClick={() => setView("log")}>Quick Log</button>
+                <button className="secondary" onClick={() => setView("checkin")}>Start skin check</button>
               </div>
             </header>
             <div className="notice-grid">
@@ -113,7 +113,7 @@ export default function App() {
         {view === "settings" && <Settings session={session} profile={profile} onProfile={setProfile} />}
       </main>
       <nav className="mobile-nav" aria-label="Mobile primary">
-        {nav.map(([value, label]) => <button className={view === value ? "active" : ""} onClick={() => setView(value)} key={value}>{label}</button>)}
+        {nav.map(([value, label]) => <button className={`${view === value ? "active" : ""} ${value === "log" ? "quick-log-nav" : ""}`} onClick={() => setView(value)} key={value}>{label}</button>)}
       </nav>
     </div>
   );
