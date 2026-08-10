@@ -373,9 +373,11 @@ details textarea { margin-top: 10px; }
 .resume-capture div:first-child { display: grid; gap: 4px; }
 .resume-capture small { color: var(--muted); }
 .quick-capture-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.photo-action-group { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .capture-action { min-height: 82px; display: grid; place-items: center; text-align: center; }
-label.capture-action { cursor: pointer; }
-.capture-action input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.file-action { cursor: pointer; }
+.gallery-action { display: grid; place-items: center; min-height: 42px; border-radius: 13px; padding: 9px 14px; font-weight: 700; text-align: center; }
+.file-action input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .mixed-evidence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .evidence-tile { display: grid; gap: 8px; align-content: start; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: #f8f6ef; }
 .evidence-tile img, .voice-evidence { width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; object-fit: cover; background: #e5eee9; }

@@ -903,7 +903,10 @@ export function ConversationalQuickLog({
             <h2>Show or tell Pajara what happened</h2>
             <p>Add a meal photo, product label, recipe screenshot, activity photo, or voice note. Mix them freely.</p>
             <div className="quick-capture-actions">
-              <label className="primary capture-action">Take / add photos<input aria-label="Take or add photos" type="file" accept="image/*" multiple disabled={imageCount >= 8} onChange={(event: ChangeEvent<HTMLInputElement>) => { void addFiles(Array.from(event.target.files || []), "image"); event.target.value = ""; }} /></label>
+              <div className="photo-action-group">
+                <label className="primary capture-action file-action">Take photo<input aria-label="Take photo with camera" type="file" accept="image/*" capture="environment" disabled={imageCount >= 8} onChange={(event: ChangeEvent<HTMLInputElement>) => { void addFiles(Array.from(event.target.files || []), "image"); event.target.value = ""; }} /></label>
+                <label className="secondary gallery-action file-action">Add existing photos<input aria-label="Add existing photos" type="file" accept="image/*" multiple disabled={imageCount >= 8} onChange={(event: ChangeEvent<HTMLInputElement>) => { void addFiles(Array.from(event.target.files || []), "image"); event.target.value = ""; }} /></label>
+              </div>
               {!voice.recording ? <button className="secondary capture-action" type="button" disabled={voiceCount >= 4} onClick={() => void startVoice("evidence")}>Speak</button> : <button className="danger capture-action" type="button" onClick={() => void stopVoice()}>Stop recording</button>}
             </div>
             <small>{imageCount}/8 images · {voiceCount}/4 voice notes · 30 seconds each</small>
